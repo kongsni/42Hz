@@ -490,7 +490,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                 content: {
                     title: `42Hz · ${report.title}`,
                     description: `같은 선택 ${report.matched}개 · 다른 선택 ${report.different}개`,
-                    imageUrl: `${window.location.origin}/42hz-kakao.png`,
+                    imageUrl: `${window.location.origin}/42hz-kakao.png?v=2`,
                     link
                 },
                 buttons: [{

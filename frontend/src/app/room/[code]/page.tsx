@@ -132,6 +132,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     const [copyMessage, setCopyMessage] = useState('');
     const [sharing, setSharing] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
+    const [restoring, setRestoring] = useState(true);
 
     useEffect(() => {
         setToken(readToken(code));
@@ -157,358 +158,404 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         return () => clearInterval(timer);
     }, [token, refreshRoom]);
 
+    // 재접속 시 서버에 저장된 답변을 기준으로 진행 위치를 복원합니다.
+    // 이미 13개 질문이 완료됐다면 카운트다운/질문 화면을 거치지 않습니다.
     useEffect(() => {
-        if (room?.status === 'READY' && phase === 'room') {
-            setPhase('countdown');
-            setCountdown(3);
-        }
-    }, [room?.status, phase]);
-
-    useEffect(() => {
-        if (phase !== 'countdown') return;
-        if (countdown <= 0) {
-            setPhase('question');
+        if (!token || !room || phase !== 'room') return;
+        if (room.status !== 'READY' && room.participants.length < 2) {
+            setRestoring(false);
             return;
         }
-        const timer = setTimeout(() => setCountdown(v => v - 1), 1000);
-        return () => clearTimeout(timer);
-    }, [phase, countdown]);
 
-    // 이전 질문의 API 응답이 다음 질문 화면에 반영되지 않도록 합니다.
-    const refreshAnswer = useCallback(async () => {
-        if (!token || phase !== 'question') return;
+        let cancelled = false;
+        async function restoreProgress() {
+            setRestoring(true);
+            try {
+                const data = await api<ResultsState>(
+                    `/api/v1/rooms/${code}/results`,
+{headers: {Authorization: `Bearer ${token}`}}
+);
+if (cancelled) return;
+if (data.allComplete) {
+    setResult(data);
+    setPhase('results');
+    return;
+}
+// 두 사람이 답변을 마친 질문은 건너뛰되, 아직 진행 중인 질문은 유지합니다.
+const nextIndex = QUESTIONS.findIndex((_, i) =>
+    !data.questions.some(q => q.questionIndex === i && q.complete)
+);
+if (nextIndex > 0) {
+    activeQuestionRef.current = nextIndex;
+    setIndex(nextIndex);
+    setPhase('question');
+} else {
+    setCountdown(3);
+    setPhase('countdown');
+}
+} catch {
+    if (!cancelled) {
+        // 진행 상태 조회가 실패하면 기존 시작 흐름을 유지합니다.
+        setCountdown(3);
+        setPhase('countdown');
+    }
+} finally {
+    if (!cancelled) setRestoring(false);
+}
+}
+void restoreProgress();
+return () => { cancelled = true; };
+}, [token, room?.status, room?.participants.length, phase, code]);
 
-        const requestedIndex = index;
-        const version = ++requestVersionRef.current;
+useEffect(() => {
+    if (phase !== 'countdown') return;
+    if (countdown <= 0) {
+        setPhase('question');
+        return;
+    }
+    const timer = setTimeout(() => setCountdown(v => v - 1), 1000);
+    return () => clearTimeout(timer);
+}, [phase, countdown]);
 
-        try {
-            const data = await api<AnswerState>(
-                `/api/v1/rooms/${code}/answers/${requestedIndex}`,
-                {headers: {Authorization: `Bearer ${token}`}}
-            );
+// 이전 질문의 API 응답이 다음 질문 화면에 반영되지 않도록 합니다.
+const refreshAnswer = useCallback(async () => {
+    if (!token || phase !== 'question') return;
 
-            if (
-                version !== requestVersionRef.current ||
-                activeQuestionRef.current !== requestedIndex ||
-                data.questionIndex !== requestedIndex
-            ) {
-                return;
-            }
+    const requestedIndex = index;
+    const version = ++requestVersionRef.current;
 
-            setAnswerState(data);
+    try {
+        const data = await api<AnswerState>(
+            `/api/v1/rooms/${code}/answers/${requestedIndex}`,
+            {headers: {Authorization: `Bearer ${token}`}}
+        );
 
-            if (data.submitted && data.myAnswer) {
-                setAnswer(data.myAnswer);
-            }
-        } catch (e) {
-            if (
-                version === requestVersionRef.current &&
-                activeQuestionRef.current === requestedIndex
-            ) {
-                setError(e instanceof Error ? e.message : '답변 상태를 불러오지 못했습니다.');
-            }
+        if (
+            version !== requestVersionRef.current ||
+            activeQuestionRef.current !== requestedIndex ||
+            data.questionIndex !== requestedIndex
+        ) {
+            return;
         }
-    }, [token, phase, code, index]);
 
-    useEffect(() => {
-        activeQuestionRef.current = index;
+        setAnswerState(data);
+
+        if (data.submitted && data.myAnswer) {
+            setAnswer(data.myAnswer);
+        }
+    } catch (e) {
+        if (
+            version === requestVersionRef.current &&
+            activeQuestionRef.current === requestedIndex
+        ) {
+            setError(e instanceof Error ? e.message : '답변 상태를 불러오지 못했습니다.');
+        }
+    }
+}, [token, phase, code, index]);
+
+useEffect(() => {
+    activeQuestionRef.current = index;
+    ++requestVersionRef.current;
+    setAnswerState(null);
+    setAnswer('');
+
+    if (phase !== 'question') return;
+
+    void refreshAnswer();
+    const timer = setInterval(() => void refreshAnswer(), 1800);
+
+    return () => {
+        clearInterval(timer);
         ++requestVersionRef.current;
+    };
+}, [phase, index, refreshAnswer]);
+
+async function join(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+
+    try {
+        const data = await api<{participantToken: string}>(
+            `/api/v1/rooms/${code}/join`,
+            {
+                method: 'POST',
+                body: JSON.stringify({nickname: nickname.trim()})
+            }
+        );
+
+        saveToken(code, data.participantToken);
+        setToken(data.participantToken);
+    } catch (e) {
+        setError(e instanceof Error ? e.message : '입장에 실패했습니다.');
+    } finally {
+        setBusy(false);
+    }
+}
+
+async function copy(value: string, label: string) {
+    try {
+        await navigator.clipboard.writeText(value);
+        setCopyMessage(`${label} 복사 완료`);
+        setTimeout(() => setCopyMessage(''), 1800);
+    } catch {
+        setCopyMessage('복사하지 못했습니다. 주소창을 이용해 주세요.');
+    }
+}
+
+async function submitAnswer(e: FormEvent) {
+    e.preventDefault();
+
+    if (!token || busy || !answer.trim() || answerState?.submitted) return;
+
+    const submittedIndex = index;
+    const submittedAnswer = answer.trim();
+
+    setBusy(true);
+    setError('');
+    ++requestVersionRef.current;
+
+    try {
+        const data = await api<AnswerState>(
+            `/api/v1/rooms/${code}/answers`,
+            {
+                method: 'POST',
+                headers: {Authorization: `Bearer ${token}`},
+                body: JSON.stringify({
+                    questionIndex: submittedIndex,
+                    answer: submittedAnswer
+                })
+            }
+        );
+
+        if (
+            activeQuestionRef.current === submittedIndex &&
+            data.questionIndex === submittedIndex
+        ) {
+            ++requestVersionRef.current;
+            setAnswerState(data);
+        }
+    } catch (e) {
+        if (activeQuestionRef.current === submittedIndex) {
+            setError(e instanceof Error ? e.message : '답변을 제출하지 못했습니다.');
+        }
+    } finally {
+        setBusy(false);
+    }
+}
+
+async function nextQuestion() {
+    if (!answerState?.bothSubmitted || answerState.questionIndex !== index) return;
+
+    ++requestVersionRef.current;
+
+    if (index < 12) {
+        activeQuestionRef.current = index + 1;
         setAnswerState(null);
         setAnswer('');
-
-        if (phase !== 'question') return;
-
-        void refreshAnswer();
-        const timer = setInterval(() => void refreshAnswer(), 1800);
-
-        return () => {
-            clearInterval(timer);
-            ++requestVersionRef.current;
-        };
-    }, [phase, index, refreshAnswer]);
-
-    async function join(e: FormEvent) {
-        e.preventDefault();
-        setBusy(true);
-        setError('');
+        setIndex(v => v + 1);
+    } else {
+        setPhase('results');
 
         try {
-            const data = await api<{participantToken: string}>(
-                `/api/v1/rooms/${code}/join`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({nickname: nickname.trim()})
-                }
+            const data = await api<ResultsState>(
+                `/api/v1/rooms/${code}/results`,
+                {headers: {Authorization: `Bearer ${token}`}}
             );
-
-            saveToken(code, data.participantToken);
-            setToken(data.participantToken);
+            setResult(data);
         } catch (e) {
-            setError(e instanceof Error ? e.message : '입장에 실패했습니다.');
-        } finally {
-            setBusy(false);
+            setError(e instanceof Error ? e.message : '결과를 불러오지 못했습니다.');
         }
     }
+}
 
-    async function copy(value: string, label: string) {
+useEffect(() => {
+    if (phase !== 'results' || !token) return;
+
+    let live = true;
+
+    async function load() {
         try {
-            await navigator.clipboard.writeText(value);
-            setCopyMessage(`${label} 복사 완료`);
-            setTimeout(() => setCopyMessage(''), 1800);
-        } catch {
-            setCopyMessage('복사하지 못했습니다. 주소창을 이용해 주세요.');
-        }
-    }
-
-    async function submitAnswer(e: FormEvent) {
-        e.preventDefault();
-
-        if (!token || busy || !answer.trim() || answerState?.submitted) return;
-
-        const submittedIndex = index;
-        const submittedAnswer = answer.trim();
-
-        setBusy(true);
-        setError('');
-        ++requestVersionRef.current;
-
-        try {
-            const data = await api<AnswerState>(
-                `/api/v1/rooms/${code}/answers`,
-                {
-                    method: 'POST',
-                    headers: {Authorization: `Bearer ${token}`},
-                    body: JSON.stringify({
-                        questionIndex: submittedIndex,
-                        answer: submittedAnswer
-                    })
-                }
+            const data = await api<ResultsState>(
+                `/api/v1/rooms/${code}/results`,
+                {headers: {Authorization: `Bearer ${token}`}}
             );
-
-            if (
-                activeQuestionRef.current === submittedIndex &&
-                data.questionIndex === submittedIndex
-            ) {
-                ++requestVersionRef.current;
-                setAnswerState(data);
-            }
-        } catch (e) {
-            if (activeQuestionRef.current === submittedIndex) {
-                setError(e instanceof Error ? e.message : '답변을 제출하지 못했습니다.');
-            }
-        } finally {
-            setBusy(false);
-        }
+            if (live) setResult(data);
+        } catch {}
     }
 
-    async function nextQuestion() {
-        if (!answerState?.bothSubmitted || answerState.questionIndex !== index) return;
+    void load();
+    const timer = setInterval(() => void load(), 2000);
 
-        ++requestVersionRef.current;
+    return () => {
+        live = false;
+        clearInterval(timer);
+    };
+}, [phase, token, code]);
 
-        if (index < 12) {
-            activeQuestionRef.current = index + 1;
-            setAnswerState(null);
-            setAnswer('');
-            setIndex(v => v + 1);
+async function getShareUrl(): Promise<string> {
+    if (!token || !result?.allComplete) throw new Error('결과를 모두 완료한 뒤 공유할 수 있습니다.');
+    const shared = await api<{shareToken: string; sharePath: string}>(
+        `/api/v1/rooms/${encodeURIComponent(code)}/share`,
+        {method: 'POST', headers: {Authorization: `Bearer ${token}`}}
+    );
+    return `${window.location.origin}${shared.sharePath}`;
+}
+
+async function withShareUrl(action: (url: string) => Promise<void> | void) {
+    if (sharing) return;
+    setSharing(true);
+    setCopyMessage('');
+    try {
+        const url = await getShareUrl();
+        await action(url);
+    } catch (e) {
+        if (!(e instanceof Error && e.name === 'AbortError')) {
+            setCopyMessage(e instanceof Error ? e.message : '공유에 실패했습니다.');
+        }
+    } finally {
+        setSharing(false);
+    }
+}
+
+async function shareReport() {
+    setShareOpen(value => !value);
+}
+
+async function shareLink() {
+    await withShareUrl(async url => { await copy(url, '공유 링크'); });
+}
+
+async function shareToX() {
+    await withShareUrl(url => {
+        const report = buildReport(result!);
+        const text = `42Hz · ${report.title} | 같은 선택 ${report.matched}개 · 다른 선택 ${report.different}개`;
+        window.open(`https://twitter.com/intent/tweet?${new URLSearchParams({text, url})}`, '_blank', 'noopener,noreferrer');
+    });
+}
+
+async function shareToKakao() {
+    await withShareUrl(async url => {
+        const report = buildReport(result!);
+        const text = `42Hz · ${report.title}\n${url}`;
+        if (navigator.share) {
+            await navigator.share({title: '42Hz · 우리의 주파수', text, url});
         } else {
-            setPhase('results');
-
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                setResult(data);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : '결과를 불러오지 못했습니다.');
-            }
+            await copy(text, '카카오톡에 보낼 내용');
+            setCopyMessage('내용을 복사했어요. 카카오톡 대화방에 붙여넣어 주세요.');
         }
-    }
+    });
+}
 
-    useEffect(() => {
-        if (phase !== 'results' || !token) return;
-
-        let live = true;
-
-        async function load() {
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                if (live) setResult(data);
-            } catch {}
-        }
-
-        void load();
-        const timer = setInterval(() => void load(), 2000);
-
-        return () => {
-            live = false;
-            clearInterval(timer);
-        };
-    }, [phase, token, code]);
-
-    async function getShareUrl(): Promise<string> {
-        if (!token || !result?.allComplete) throw new Error('결과를 모두 완료한 뒤 공유할 수 있습니다.');
-        const shared = await api<{shareToken: string; sharePath: string}>(
-            `/api/v1/rooms/${encodeURIComponent(code)}/share`,
-            {method: 'POST', headers: {Authorization: `Bearer ${token}`}}
-        );
-        return `${window.location.origin}${shared.sharePath}`;
-    }
-
-    async function withShareUrl(action: (url: string) => Promise<void> | void) {
-        if (sharing) return;
-        setSharing(true);
-        setCopyMessage('');
+async function shareImage() {
+    await withShareUrl(async url => {
+        const report = buildReport(result!);
+        const card = document.createElement('div');
+        Object.assign(card.style, {
+            position: 'fixed', left: '0', top: '0', width: '420px',
+            boxSizing: 'border-box', padding: '44px 34px', background: '#faf7f5',
+            color: '#29252d', fontFamily: 'Arial, sans-serif', textAlign: 'center',
+            borderRadius: '20px', zIndex: '-1', pointerEvents: 'none'
+        });
+        const label = document.createElement('div');
+        label.textContent = '42Hz · OUR FREQUENCY';
+        Object.assign(label.style, {fontSize: '13px', letterSpacing: '3px', color: '#8a7e91'});
+        const title = document.createElement('h2');
+        title.textContent = report.title;
+        Object.assign(title.style, {fontSize: '28px', lineHeight: '1.5', margin: '36px 0 24px'});
+        const stats = document.createElement('div');
+        stats.textContent = `같은 선택 ${report.matched}개   ·   다른 선택 ${report.different}개`;
+        Object.assign(stats.style, {fontSize: '18px', marginBottom: '26px'});
+        const desc = document.createElement('p');
+        desc.textContent = report.connection;
+        Object.assign(desc.style, {fontSize: '15px', lineHeight: '1.8', color: '#6b6370'});
+        const footer = document.createElement('p');
+        footer.textContent = url;
+        Object.assign(footer.style, {fontSize: '12px', marginTop: '34px', overflowWrap: 'anywhere', color: '#8a7e91'});
+        card.append(label, title, stats, desc, footer);
+        document.body.appendChild(card);
         try {
-            const url = await getShareUrl();
-            await action(url);
-        } catch (e) {
-            if (!(e instanceof Error && e.name === 'AbortError')) {
-                setCopyMessage(e instanceof Error ? e.message : '공유에 실패했습니다.');
+            await document.fonts.ready;
+            const dataUrl = await toPng(card, {pixelRatio: 2, backgroundColor: '#faf7f5', cacheBust: true});
+            const blob = await (await fetch(dataUrl)).blob();
+            const file = new File([blob], '42hz-result.png', {type: 'image/png'});
+            if (navigator.canShare?.({files: [file]}) && navigator.share) {
+                await navigator.share({files: [file], title: '42Hz · 우리의 주파수'});
+            } else {
+                const link = document.createElement('a');
+                link.href = dataUrl;
+                link.download = '42hz-result.png';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setCopyMessage('결과 이미지를 저장했어요. 인스타그램에 올려보세요.');
             }
         } finally {
-            setSharing(false);
+            card.remove();
         }
-    }
+    });
+}
 
-    async function shareReport() {
-        setShareOpen(value => !value);
-    }
+const question = QUESTIONS[index];
+const visibleAnswerState =
+    answerState?.questionIndex === index ? answerState : null;
 
-    async function shareLink() {
-        await withShareUrl(async url => { await copy(url, '공유 링크'); });
-    }
+return (
+    <main className="panel-page">
+        <Link className="logo" href="/">42Hz</Link>
+        <div className="room-shell">
+            <section className="room-card">
 
-    async function shareToX() {
-        await withShareUrl(url => {
-            const report = buildReport(result!);
-            const text = `42Hz · ${report.title} | 같은 선택 ${report.matched}개 · 다른 선택 ${report.different}개`;
-            window.open(`https://twitter.com/intent/tweet?${new URLSearchParams({text, url})}`, '_blank', 'noopener,noreferrer');
-        });
-    }
+                {phase === 'room' && restoring && token && room?.status === 'READY' ? (
+                    <div className="experience-center"><p className="muted">이전 진행 상태를 확인하고 있어요…</p></div>
+                ) : null}
+                {phase === 'room' && !(restoring && token && room?.status === 'READY') && (
+                    <>
+                        <div className="eyebrow">YOUR PRIVATE SPACE</div>
+                        {token ? (
+                            <>
+                                <h1>우리의 주파수를 맞추는 중</h1>
+                                <p className="muted">상대방에게 초대 코드를 보내주세요. 두 사람이 입장하면 함께 시작합니다.</p>
+                                <div className="code-label" style={{textAlign:'center',marginTop:18}}>INVITATION CODE</div>
+                                <div className="code-box" style={{borderStyle:'solid'}}>{code}</div>
 
-    async function shareToKakao() {
-        await withShareUrl(async url => {
-            const report = buildReport(result!);
-            const text = `42Hz · ${report.title}\n${url}`;
-            if (navigator.share) {
-                await navigator.share({title: '42Hz · 우리의 주파수', text, url});
-            } else {
-                await copy(text, '카카오톡에 보낼 내용');
-                setCopyMessage('내용을 복사했어요. 카카오톡 대화방에 붙여넣어 주세요.');
-            }
-        });
-    }
+                                <div className="member-list">
+                                    {[0,1].map(i => {
+                                        const p = room?.participants[i];
+                                        return (
+                                            <div className="member" key={i}>
+                                                <span className={`member-dot ${i === 1 ? 'pink' : ''}`}/>
+                                                <div>{p?.nickname ?? (i === 0 ? '나' : '상대방')}</div>
+                                                <small className="muted">{p ? '참여 완료' : '입장 대기 중'}</small>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
 
-    async function shareImage() {
-        await withShareUrl(async url => {
-            const report = buildReport(result!);
-            const card = document.createElement('div');
-            Object.assign(card.style, {
-                position: 'fixed', left: '-10000px', top: '0', width: '420px',
-                boxSizing: 'border-box', padding: '44px 34px', background: '#faf7f5',
-                color: '#29252d', fontFamily: 'Arial, sans-serif', textAlign: 'center',
-                borderRadius: '20px', zIndex: '-1'
-            });
-            const label = document.createElement('div');
-            label.textContent = '42Hz · OUR FREQUENCY';
-            Object.assign(label.style, {fontSize: '13px', letterSpacing: '3px', color: '#8a7e91'});
-            const title = document.createElement('h2');
-            title.textContent = report.title;
-            Object.assign(title.style, {fontSize: '28px', lineHeight: '1.5', margin: '36px 0 24px'});
-            const stats = document.createElement('div');
-            stats.textContent = `같은 선택 ${report.matched}개   ·   다른 선택 ${report.different}개`;
-            Object.assign(stats.style, {fontSize: '18px', marginBottom: '26px'});
-            const desc = document.createElement('p');
-            desc.textContent = report.connection;
-            Object.assign(desc.style, {fontSize: '15px', lineHeight: '1.8', color: '#6b6370'});
-            const footer = document.createElement('p');
-            footer.textContent = url;
-            Object.assign(footer.style, {fontSize: '12px', marginTop: '34px', overflowWrap: 'anywhere', color: '#8a7e91'});
-            card.append(label, title, stats, desc, footer);
-            document.body.appendChild(card);
-            try {
-                const dataUrl = await toPng(card, {pixelRatio: 2, backgroundColor: '#faf7f5'});
-                const blob = await (await fetch(dataUrl)).blob();
-                const file = new File([blob], '42hz-result.png', {type: 'image/png'});
-                if (navigator.canShare?.({files: [file]}) && navigator.share) {
-                    await navigator.share({files: [file], title: '42Hz · 우리의 주파수'});
-                } else {
-                    const link = document.createElement('a');
-                    link.href = dataUrl;
-                    link.download = '42hz-result.png';
-                    document.body.appendChild(link);
-                    link.click();
-                    link.remove();
-                    setCopyMessage('결과 이미지를 저장했어요. 인스타그램에 올려보세요.');
-                }
-            } finally {
-                card.remove();
-            }
-        });
-    }
+                                <Wave/>
+                                <button className="action" onClick={() => copy(code, '초대 코드')}>초대 코드 복사</button>
+                                <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초 대 링크')}>초대 링크 복사</button>
+                                {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
+                                <p className="status-line">
+                                    <span className="status-dot"/>
+                                    {room?.status === 'READY' ? '연결을 준비하고 있어요…' : '상대방이 입장하면 주파수가 연결됩니다.'}
+                                </p>
+                            </>
+                        ) : (
+                            <div className="invite-experience">
+                                <div className="invite-heading">
+                                    <div className="eyebrow">A LITTLE NOTE FOR YOU</div>
+                                    <h1>{invitationOpened ? '두 사람의 주파수를 연결해 볼까요?' : '당신에게 초대장이 도착했어요.'}</h1>
+                                    <p className="muted">{invitationOpened ? '이름을 남기면 둘만의 이야기가 시작돼요.' : '누군가 당신과 조금 더 가까워지고 싶어 해요.'}</p>
+                                </div>
 
-    const question = QUESTIONS[index];
-    const visibleAnswerState =
-        answerState?.questionIndex === index ? answerState : null;
-
-    return (
-        <main className="panel-page">
-            <Link className="logo" href="/">42Hz</Link>
-            <div className="room-shell">
-                <section className="room-card">
-
-                    {phase === 'room' && (
-                        <>
-                            <div className="eyebrow">YOUR PRIVATE SPACE</div>
-                            {token ? (
-                                <>
-                                    <h1>우리의 주파수를 맞추는 중</h1>
-                                    <p className="muted">상대방에게 초대 코드를 보내주세요. 두 사람이 입장하면 함께 시작합니다.</p>
-                                    <div className="code-label" style={{textAlign:'center',marginTop:18}}>INVITATION CODE</div>
-                                    <div className="code-box" style={{borderStyle:'solid'}}>{code}</div>
-
-                                    <div className="member-list">
-                                        {[0,1].map(i => {
-                                            const p = room?.participants[i];
-                                            return (
-                                                <div className="member" key={i}>
-                                                    <span className={`member-dot ${i === 1 ? 'pink' : ''}`}/>
-                                                    <div>{p?.nickname ?? (i === 0 ? '나' : '상대방')}</div>
-                                                    <small className="muted">{p ? '참여 완료' : '입장 대기 중'}</small>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    <Wave/>
-                                    <button className="action" onClick={() => copy(code, '초대 코드')}>초대 코드 복사</button>
-                                    <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초 대 링크')}>초대 링크 복사</button>
-                                    {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
-                                    <p className="status-line">
-                                        <span className="status-dot"/>
-                                        {room?.status === 'READY' ? '연결을 준비하고 있어요…' : '상대방이 입장하면 주파수가 연결됩니다.'}
-                                    </p>
-                                </>
-                            ) : (
-                                <div className="invite-experience">
-                                    <div className="invite-heading">
-                                        <div className="eyebrow">A LITTLE NOTE FOR YOU</div>
-                                        <h1>{invitationOpened ? '두 사람의 주파수를 연결해 볼까요?' : '당신에게 초대장이 도착했어요.'}</h1>
-                                        <p className="muted">{invitationOpened ? '이름을 남기면 둘만의 이야기가 시작돼요.' : '누군가 당신과 조금 더 가까워지고 싶어 해요.'}</p>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        className={`envelope-button ${invitationOpened ? 'is-open' : ''}`}
-                                        onClick={() => setInvitationOpened(true)}
-                                        disabled={invitationOpened}
-                                        aria-label="초대장 열기"
-                                    >
+                                <button
+                                    type="button"
+                                    className={`envelope-button ${invitationOpened ? 'is-open' : ''}`}
+                                    onClick={() => setInvitationOpened(true)}
+                                    disabled={invitationOpened}
+                                    aria-label="초대장 열기"
+                                >
                     <span className="envelope-scene" aria-hidden="true">
                       <span className="envelope-letter">
                         <span className="letter-mark">42Hz</span>
@@ -520,105 +567,105 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                       <span className="envelope-front"/>
                       <span className="envelope-seal">♡</span>
                     </span>
-                                    </button>
+                                </button>
 
-                                    {!invitationOpened ? (
-                                        <button type="button" className="action invite-open-action" onClick={() => setInvitationOpened(true)}>
-                                            초대장 열어보기 <span aria-hidden="true">→</span>
+                                {!invitationOpened ? (
+                                    <button type="button" className="action invite-open-action" onClick={() => setInvitationOpened(true)}>
+                                        초대장 열어보기 <span aria-hidden="true">→</span>
+                                    </button>
+                                ) : (
+                                    <form className="invite-join-form" onSubmit={join}>
+                                        <div className="invite-message">서로 다른 두 개의 리듬이<br/>하나의 이야기를 만들어 갈 거예요.</div>
+                                        <label htmlFor="nickname">어떻게 불러드릴까요?</label>
+                                        <input
+                                            id="nickname"
+                                            className="field"
+                                            placeholder="예: 42Hz"
+                                            maxLength={16}
+                                            required
+                                            value={nickname}
+                                            onChange={e => setNickname(e.target.value)}
+                                        />
+                                        <button className="action" disabled={busy || !nickname.trim()}>
+                                            {busy ? '입장 중…' : '주파수 연결하기 →'}
                                         </button>
-                                    ) : (
-                                        <form className="invite-join-form" onSubmit={join}>
-                                            <div className="invite-message">서로 다른 두 개의 리듬이<br/>하나의 이야기를 만들어 갈 거예요.</div>
-                                            <label htmlFor="nickname">어떻게 불러드릴까요?</label>
-                                            <input
-                                                id="nickname"
-                                                className="field"
-                                                placeholder="예: 42Hz"
-                                                maxLength={16}
-                                                required
-                                                value={nickname}
-                                                onChange={e => setNickname(e.target.value)}
-                                            />
-                                            <button className="action" disabled={busy || !nickname.trim()}>
-                                                {busy ? '입장 중…' : '주파수 연결하기 →'}
-                                            </button>
-                                        </form>
-                                    )}
-                                </div>
-                            )}
-                        </>
-                    )}
+                                    </form>
+                                )}
+                            </div>
+                        )}
+                    </>
+                )}
 
-                    {phase === 'countdown' && (
-                        <div className="experience-center">
-                            <div className="eyebrow">CONNECTED</div>
-                            <Wave connected/>
-                            <h1>두 개의 주파수가 만났어요.</h1>
-                            <p className="muted">이제 서로를 조금 더 알아볼 시간이에요.</p>
-                            <div className="countdown-number">{countdown || '시작'}</div>
-                            <p className="muted">{countdown ? '함께 시작할 준비를 해주세요.' : '첫 번째 질문으로 이동합니다.'}</p>
+                {phase === 'countdown' && (
+                    <div className="experience-center">
+                        <div className="eyebrow">CONNECTED</div>
+                        <Wave connected/>
+                        <h1>두 개의 주파수가 만났어요.</h1>
+                        <p className="muted">이제 서로를 조금 더 알아볼 시간이에요.</p>
+                        <div className="countdown-number">{countdown || '시작'}</div>
+                        <p className="muted">{countdown ? '함께 시작할 준비를 해주세요.' : '첫 번째 질문으로 이동합니다.'}</p>
+                    </div>
+                )}
+
+                {phase === 'question' && (
+                    <>
+                        <div className="question-progress">
+                            <span>QUESTION {String(index + 1).padStart(2, '0')} / 13</span>
+                            <span>{Math.round(((index + 1) / 13) * 100)}%</span>
                         </div>
-                    )}
+                        <div className="progress-track">
+                            <div style={{width: `${((index + 1) / 13) * 100}%`}}/>
+                        </div>
+                        <div className="eyebrow" style={{marginTop:28}}>42HZ · OUR EXPERIENCE</div>
+                        <h1>{question.title}</h1>
+                        <p className="question-prompt">{question.prompt}</p>
 
-                    {phase === 'question' && (
-                        <>
-                            <div className="question-progress">
-                                <span>QUESTION {String(index + 1).padStart(2, '0')} / 13</span>
-                                <span>{Math.round(((index + 1) / 13) * 100)}%</span>
-                            </div>
-                            <div className="progress-track">
-                                <div style={{width: `${((index + 1) / 13) * 100}%`}}/>
-                            </div>
-                            <div className="eyebrow" style={{marginTop:28}}>42HZ · OUR EXPERIENCE</div>
-                            <h1>{question.title}</h1>
-                            <p className="question-prompt">{question.prompt}</p>
-
-                            {visibleAnswerState?.bothSubmitted ? (
-                                <div className="answer-reveal">
-                                    <p className="eyebrow">BOTH ANSWERS SUBMITTED</p>
-                                    <h2>서로의 선택을 확인해 보세요.</h2>
-                                    <div className="answer-pair">
-                                        <div>
-                                            <small>나의 답변</small>
-                                            <p>{visibleAnswerState.myAnswer}</p>
-                                        </div>
-                                        <div>
-                                            <small>상대방의 답변</small>
-                                            <p>{visibleAnswerState.partnerAnswer}</p>
-                                        </div>
+                        {visibleAnswerState?.bothSubmitted ? (
+                            <div className="answer-reveal">
+                                <p className="eyebrow">BOTH ANSWERS SUBMITTED</p>
+                                <h2>서로의 선택을 확인해 보세요.</h2>
+                                <div className="answer-pair">
+                                    <div>
+                                        <small>나의 답변</small>
+                                        <p>{visibleAnswerState.myAnswer}</p>
                                     </div>
-                                    <button className="action" onClick={nextQuestion}>
-                                        {index === 12 ? '결과 확인하기 →' : '다음 질문으로 →'}
-                                    </button>
+                                    <div>
+                                        <small>상대방의 답변</small>
+                                        <p>{visibleAnswerState.partnerAnswer}</p>
+                                    </div>
                                 </div>
-                            ) : visibleAnswerState?.submitted ? (
-                                <div className="waiting-answer">
-                                    <Wave/>
-                                    <h2>답변을 보관했어요.</h2>
-                                    <p className="muted">상대방이 답변을 제출하면 함께 공개됩니다.</p>
-                                    <p className="status-line">
-                                        <span className="status-dot"/>
-                                        {visibleAnswerState.submittedCount}/2명 제출 완료
-                                    </p>
-                                </div>
-                            ) : (
-                                <form key={index} onSubmit={submitAnswer} className="answer-form">
-                                    {question.type === 'choice' ? (
-                                        question.options?.map((option, i) => (
-                                            <label className={`answer-option ${answer === option ? 'selected' : ''}`} key={option}>
-                                                <input
-                                                    type="radio"
-                                                    name={`q-${index}`}
-                                                    value={option}
-                                                    checked={answer === option}
-                                                    onChange={() => setAnswer(option)}
-                                                />
-                                                <span className="option-letter">{String.fromCharCode(65 + i)}</span>
-                                                <span>{option}</span>
-                                            </label>
-                                        ))
-                                    ) : (
-                                        <>
+                                <button className="action" onClick={nextQuestion}>
+                                    {index === 12 ? '결과 확인하기 →' : '다음 질문으로 →'}
+                                </button>
+                            </div>
+                        ) : visibleAnswerState?.submitted ? (
+                            <div className="waiting-answer">
+                                <Wave/>
+                                <h2>답변을 보관했어요.</h2>
+                                <p className="muted">상대방이 답변을 제출하면 함께 공개됩니다.</p>
+                                <p className="status-line">
+                                    <span className="status-dot"/>
+                                    {visibleAnswerState.submittedCount}/2명 제출 완료
+                                </p>
+                            </div>
+                        ) : (
+                            <form key={index} onSubmit={submitAnswer} className="answer-form">
+                                {question.type === 'choice' ? (
+                                    question.options?.map((option, i) => (
+                                        <label className={`answer-option ${answer === option ? 'selected' : ''}`} key={option}>
+                                            <input
+                                                type="radio"
+                                                name={`q-${index}`}
+                                                value={option}
+                                                checked={answer === option}
+                                                onChange={() => setAnswer(option)}
+                                            />
+                                            <span className="option-letter">{String.fromCharCode(65 + i)}</span>
+                                            <span>{option}</span>
+                                        </label>
+                                    ))
+                                ) : (
+                                    <>
                       <textarea
                           className="field text-answer"
                           maxLength={1000}
@@ -627,144 +674,110 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                           onChange={e => setAnswer(e.target.value)}
                           placeholder={question.hint}
                       />
-                                            <p className="muted char-count">{answer.length}/1000</p>
-                                        </>
-                                    )}
-                                    <button className="action" disabled={busy || !answer.trim()}>
-                                        {busy ? '제출 중…' : '답변 제출하기 →'}
-                                    </button>
-                                    <p className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
-                                </form>
-                            )}
-                        </>
-                    )}
+                                        <p className="muted char-count">{answer.length}/1000</p>
+                                    </>
+                                )}
+                                <button className="action" disabled={busy || !answer.trim()}>
+                                    {busy ? '제출 중…' : '답변 제출하기 →'}
+                                </button>
+                                <p className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
+                            </form>
+                        )}
+                    </>
+                )}
 
-                    {phase === 'results' && (
-                        <>
-                            <div className="eyebrow">YOUR FREQUENCY REPORT</div>
-                            <h1>서로의 답을 확인해 보세요.</h1>
-                            <p className="muted">두 사람의 답변을 나란히 모았어요. 서로 다른 선택도 새로운 발견이 될 수 있습니다.</p>
+                {phase === 'results' && (
+                    <>
+                        <div className="eyebrow">YOUR FREQUENCY REPORT</div>
+                        <h1>오늘, 우리의 주파수가 닿았어요.</h1>
+                        <p className="muted">두 사람의 답변으로 발견한 작은 이야기를 확인해 보세요.</p>
 
-                            {!result?.allComplete ? (
-                                <div className="waiting-answer">
-                                    <Wave/>
-                                    <p>상대방의 마지막 답변을 기다리고 있어요.</p>
-                                </div>
-                            ) : (
-                                <div className="results-list">
-                                    {(() => {
-                                        const report = buildReport(result);
-                                        return (
-                                            <section className="frequency-report">
-                                                <div className="eyebrow">42Hz · OUR FREQUENCY</div>
-                                                <h2>{report.title}</h2>
-                                                <p className="muted">두 사람의 답변으로 발견한 작은 이야기</p>
-                                                <Wave connected/>
-                                                <div className="report-stats">
-                                                    <div><strong>{report.matched}</strong><span>같은 선택</span></div>
-                                                    <div><strong>{report.different}</strong><span>다른 선택</span></div>
-                                                </div>
-                                                <div className="report-insights">
-                                                    <article>
-                                                        <span>01 · 우리의 리듬</span>
-                                                        <h3>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h3>
-                                                        <p>{report.connection}</p>
-                                                    </article>
-                                                    <article>
-                                                        <span>02 · 서로를 위한 힌트</span>
-                                                        <h3>힘든 날의 위로</h3>
-                                                        <p>{report.comfort}</p>
-                                                    </article>
-                                                    <article>
-                                                        <span>03 · 오래 남을 장면</span>
-                                                        <h3>각자의 마음에 남은 기억</h3>
-                                                        <p>서로가 고른 장면을 천천히 읽어 보세요. 같은 하루를 다르게 기억하고 있을 수도 있어요.</p>
-                                                        {report.memory && (
-                                                            <div className="report-memories">
-                                                                <p><b>나</b> {report.memory.myAnswer || '—'}</p>
-                                                                <p><b>상대방</b> {report.memory.partnerAnswer || '—'}</p>
-                                                            </div>
-                                                        )}
-                                                    </article>
-                                                </div>
-                                                <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격 을 진단하지 않습니다.</p>
-                                                <button
-                                                    className="action secondary"
-                                                    onClick={() => {
-                                                        const lines = [
-                                                            `42Hz · ${report.title}`,
-                                                            `같은 선택 ${report.matched}개 · 다른 선택 ${report.different}개`,
-                                                            report.connection,
-                                                            report.comfort
-                                                        ];
-                                                        void copy(lines.join('\n'), '결과 요약');
-                                                    }}
-                                                >
-                                                    우리의 결과 요약 복사하기
-                                                </button>
-                                            </section>
-                                        );
-                                    })()}
-
-                                    {QUESTIONS.map((q, i) => {
-                                        const item = result.questions.find(r => r.questionIndex === i);
-                                        return (
-                                            <article className="result-item" key={i}>
-                                                <div className="eyebrow">QUESTION {String(i + 1).padStart(2, '0')}</div>
-                                                <h2>{q.title}</h2>
-                                                <p className="muted">{q.prompt}</p>
-                                                <div className="answer-pair">
-                                                    <div>
-                                                        <small>나의 답변</small>
-                                                        <p>{item?.myAnswer || '답변 없음'}</p>
-                                                    </div>
-                                                    <div>
-                                                        <small>상대방의 답변</small>
-                                                        <p>{item?.partnerAnswer || '답변 없음'}</p>
-                                                    </div>
-                                                </div>
-                                            </article>
-                                        );
-                                    })}
-
-                                    <div className="result-actions">
-                                        <h2>오늘, 우리의 주파수가 닿았어요.</h2>
-                                        <p className="muted">오늘 나눈 대화가 내일 서로를 이해하는 작은 힌트가 되기를.</p>
-                                        <button className="action" onClick={shareReport} disabled={sharing}>결과 공유하기 ↗</button>
-                                        {shareOpen && (
-                                            <div className="share-options" style={{display:'grid',gap:10,marginTop:12}}>
-                                                <button type="button" className="action secondary" disabled={sharing} onClick={shareLink}>공개 결과 링크 복사 ↗</button>
-                                                <button type="button" className="action secondary" disabled={sharing} onClick={shareToKakao}>카카오톡으로 보내기 ↗</button>
-                                                <button type="button" className="action secondary" disabled={sharing} onClick={shareToX}>X에 공유하기 ↗</button>
-                                                <button type="button" className="action secondary" disabled={sharing} onClick={shareImage}>인스타그램용 결과 이미지 ↗</button>
-                                                <p className="muted small-note">공개 링크와 이미지에는 개별 답변이 포함되지 않습니다. 카카오톡은 기기의 공유 메뉴를 사용합니다.</p>
+                        {!result?.allComplete ? (
+                            <div className="waiting-answer">
+                                <Wave/>
+                                <p>상대방의 마지막 답변을 기다리고 있어요.</p>
+                            </div>
+                        ) : (
+                            <div className="results-list">
+                                {(() => {
+                                    const report = buildReport(result);
+                                    return (
+                                        <section className="frequency-report">
+                                            <div className="eyebrow">42Hz · OUR FREQUENCY</div>
+                                            <h2>{report.title}</h2>
+                                            <p className="muted">두 사람의 답변으로 발견한 작은 이야기</p>
+                                            <Wave connected/>
+                                            <div className="report-stats">
+                                                <div><strong>{report.matched}</strong><span>같은 선택</span></div>
+                                                <div><strong>{report.different}</strong><span>다른 선택</span></div>
                                             </div>
-                                        )}
-                                        <button
-                                            className="action secondary"
-                                            onClick={() => {
-                                                ++requestVersionRef.current;
-                                                activeQuestionRef.current = 0;
-                                                setIndex(0);
-                                                setPhase('question');
-                                                setAnswerState(null);
-                                                setAnswer('');
-                                            }}
-                                        >
-                                            답변 다시 살펴보기
-                                        </button>
-                                        <Link className="action secondary" href="/rooms/create">새로운 체험 시작하기 →</Link>
-                                        <Link className="result-home" href="/">⌂ 홈으로 돌아가기</Link>
-                                        {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    )}
+                                            <div className="report-insights">
+                                                <article>
+                                                    <span>01 · 우리의 리듬</span>
+                                                    <h3>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h3>
+                                                    <p>{report.connection}</p>
+                                                </article>
+                                                <article>
+                                                    <span>02 · 서로를 위한 힌트</span>
+                                                    <h3>힘든 날의 위로</h3>
+                                                    <p>{report.comfort}</p>
+                                                </article>
+                                                <article>
+                                                    <span>03 · 오래 남을 장면</span>
+                                                    <h3>각자의 마음에 남은 기억</h3>
+                                                    <p>서로가 고른 장면을 천천히 읽어 보세요. 같은 하루를 다르게 기억하고 있을 수도 있어요.</p>
+                                                    {report.memory && (
+                                                        <div className="report-memories">
+                                                            <p><b>나</b> {report.memory.myAnswer || '—'}</p>
+                                                            <p><b>상대방</b> {report.memory.partnerAnswer || '—'}</p>
+                                                        </div>
+                                                    )}
+                                                </article>
+                                            </div>
+                                            <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격 을 진단하지 않습니다.</p>
+                                            <button
+                                                className="action secondary"
+                                                onClick={() => {
+                                                    const lines = [
+                                                        `42Hz · ${report.title}`,
+                                                        `같은 선택 ${report.matched}개 · 다른 선택 ${report.different}개`,
+                                                        report.connection,
+                                                        report.comfort
+                                                    ];
+                                                    void copy(lines.join('\n'), '결과 요약');
+                                                }}
+                                            >
+                                                우리의 결과 요약 복사하기
+                                            </button>
+                                        </section>
+                                    );
+                                })()}
 
-                    {error && <p role="alert" className="error-text">{error}</p>}
-                </section>
-            </div>
-        </main>
-    );
+                                <div className="result-actions">
+                                    <h2>오늘, 우리의 주파수가 닿았어요.</h2>
+                                    <p className="muted">오늘 나눈 대화가 내일 서로를 이해하는 작은 힌트가 되기를.</p>
+                                    <button className="action" onClick={shareReport} disabled={sharing}>결과 공유하기 ↗</button>
+                                    {shareOpen && (
+                                        <div className="share-options" style={{display:'grid',gap:10,marginTop:12}}>
+                                            <button type="button" className="action secondary" disabled={sharing} onClick={shareLink}>공개 결과 링크 복사 ↗</button>
+                                            <button type="button" className="action secondary" disabled={sharing} onClick={shareToKakao}>카카오톡으로 보내기 ↗</button>
+                                            <button type="button" className="action secondary" disabled={sharing} onClick={shareToX}>X에 공유하기 ↗</button>
+                                            <button type="button" className="action secondary" disabled={sharing} onClick={shareImage}>인스타그램용 결과 이미지 ↗</button>
+                                            <p className="muted small-note">공개 링크와 이미지에는 개별 답변이 포함되지 않습니다. 카카오톡은 기기의 공유 메뉴를 사용합니다.</p>
+                                        </div>
+                                    )}
+                                    <Link className="action secondary" href="/rooms/create">새로운 체험 시작하기 →</Link>
+                                    <Link className="result-home" href="/">⌂ 홈으로 돌아가기</Link>
+                                    {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+
+                {error && <p role="alert" className="error-text">{error}</p>}
+            </section>
+        </div>
+    </main>
+);
 }

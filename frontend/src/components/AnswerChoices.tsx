@@ -4,9 +4,9 @@
 import {useLayoutEffect, useRef, type KeyboardEvent} from 'react';
 import './AnswerChoices.css';
 
-type Props = {options: string[]; value: string; onChange: (value: string) => void; disabled?: boolean};
+type Props = {options: string[]; value: string; onChange: (value: string) => void; disabled?: boolean; labelledBy?: string};
 
-export function AnswerChoices({options, value, onChange, disabled = false}: Props) {
+export function AnswerChoices({options, value, onChange, disabled = false, labelledBy}: Props) {
     const group = useRef<HTMLDivElement>(null);
     const frame = useRef<HTMLSpanElement>(null);
     const selected = options.indexOf(value);
@@ -40,7 +40,7 @@ export function AnswerChoices({options, value, onChange, disabled = false}: Prop
     }
 
     return <div className="u015">
-        <div className="u015-grp" role="radiogroup" aria-label="답변 선택" ref={group}>
+        <div className="u015-grp" role="radiogroup" aria-label={labelledBy ? undefined : "답변 선택"} aria-labelledby={labelledBy} ref={group}>
             <span className="u015-frame" ref={frame} style={{opacity: selected < 0 ? 0 : 1}} aria-hidden="true" />
             {options.map((option, index) => <button key={option} type="button" className="u015-opt"
                 role="radio" aria-checked={value === option} disabled={disabled}

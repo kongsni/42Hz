@@ -112,6 +112,13 @@ function Wave({connected = false}: {connected?: boolean}) {
     );
 }
 
+function AnswerRevealSignal() {
+    return <svg className="answer-signal" viewBox="0 0 320 48" aria-hidden="true" focusable="false">
+        <g className="answer-signal-blue"><path d="M2 24 C45 24 48 5 82 12 S135 42 160 24 S212 5 240 22 S280 40 318 24"/></g>
+        <g className="answer-signal-pink"><path d="M2 24 C45 24 48 43 82 36 S135 6 160 24 S212 43 240 26 S280 8 318 24"/></g>
+    </svg>;
+}
+
 export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     const {code} = use(params);
 
@@ -551,7 +558,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                                     <Wave/>
                                     <button className="action" onClick={() => copy(code, '초대 코드')}>초대 코드 복사</button>
-                                    <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초 대 링크')}>초대 링크 복사</button>
+                                    <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초대 링크')}>초대 링크 복사</button>
                                     {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
                                     <p className="status-line">
                                         <span className="status-dot"/>
@@ -627,19 +634,19 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                     {phase === 'question' && (
                         <>
                             <div className="question-progress" aria-label={`13개 질문 중 ${index + 1}번째`}>
-                                <span>QUESTION {String(index + 1).padStart(2, '0')} / 13</span>
+                                <span>질문 {String(index + 1).padStart(2, '0')} / 13</span>
                                 <span>{Math.round(((index + 1) / 13) * 100)}%</span>
                             </div>
                             <div className="progress-track" role="progressbar" aria-label="질문 진행률" aria-valuemin={0} aria-valuemax={13} aria-valuenow={index + 1}>
                                 <div style={{width: `${((index + 1) / 13) * 100}%`}}/>
                             </div>
-                            <div className="eyebrow" style={{marginTop:28}}>42HZ · OUR EXPERIENCE</div>
-                            <h1>{question.title}</h1>
-                            <p className="question-prompt">{question.prompt}</p>
+                            <p className="question-context">{question.title}</p>
+                            <h1 id="question-title" className="question-prompt">{question.prompt}</h1>
 
                             {visibleAnswerState?.bothSubmitted ? (
                                 <div className="answer-reveal" key={`reveal-${index}`} role="region" aria-label="두 사람의 답변">
-                                    <span className="flow-badge">두 사람 모두 제출 완료</span>
+                                    <AnswerRevealSignal/>
+                                    <span className="flow-badge" role="status">두 사람의 답변이 공개되었어요</span>
                                     <h2>우리의 주파수가 만났어요.</h2>
                                     <p className="muted reveal-caption">같은 선택도, 다른 선택도 대화의 시작이에요.</p>
                                     <div className="answer-pair">
@@ -671,10 +678,13 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                 <form key={index} onSubmit={submitAnswer} className="answer-form">
                                     {question.type === 'choice' ? (
                                         <AnswerChoices options={question.options ?? []} value={answer}
-                                            onChange={setAnswer} disabled={busy || accessBlocked} />
+                                            onChange={setAnswer} labelledBy="question-title" disabled={busy || accessBlocked} />
                                     ) : (
                                         <>
                       <textarea
+                          aria-labelledby="question-title"
+                          aria-describedby="answer-count answer-privacy"
+                          name="answer"
                           className="field text-answer"
                           maxLength={1000}
                           rows={4}
@@ -682,13 +692,13 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                           onChange={e => setAnswer(e.target.value)}
                           placeholder={question.hint}
                       />
-                                            <p className="muted char-count">{answer.length}/1000</p>
+                                            <p id="answer-count" className="muted char-count">{answer.length}/1000</p>
                                         </>
                                     )}
                                     <button className="action" disabled={accessBlocked || busy || !answer.trim()}>
                                         {busy ? '제출 중…' : '답변 제출하기 →'}
                                     </button>
-                                    <p className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
+                                    <p id="answer-privacy" className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
                                 </form>
                             )}
                         </>
@@ -696,12 +706,9 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                     {phase === 'results' && (
                         <>
-                            <div className="eyebrow">YOUR FREQUENCY REPORT</div>
-                            <h1>서로의 답을 확인해 보세요.</h1>
-                            <p className="muted">두 사람의 답변을 나란히 모았어요. 서로 다른 선택도 새로운 발견이 될 수 있습니다.</p>
-
                             {!result?.allComplete ? (
                                 <div className="waiting-answer" role="status" aria-live="polite">
+                                    <h1>두 사람의 기록을 모으고 있어요.</h1>
                                     <Wave/>
                                     <p>상대방의 마지막 답변을 기다리고 있어요.</p>
                                 </div>
@@ -711,28 +718,26 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                         const report = buildReport(result);
                                         return (
                                             <section className="frequency-report">
-                                                <div className="eyebrow">42Hz · OUR FREQUENCY</div>
-                                                <h2>{report.title}</h2>
-                                                <p className="muted">두 사람의 답변으로 발견한 작은 이야기</p>
-                                                <Wave connected/>
+                                                <h1>{report.title}</h1>
                                                 <div className="report-stats">
                                                     <div><strong>{report.matched}</strong><span>같은 선택</span></div>
                                                     <div><strong>{report.different}</strong><span>다른 선택</span></div>
                                                 </div>
+                                                <Wave connected/>
                                                 <div className="report-insights">
                                                     <article>
-                                                        <span>01 · 우리의 리듬</span>
-                                                        <h3>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h3>
+                                                        <span>우리의 리듬</span>
+                                                        <h2>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h2>
                                                         <p>{report.connection}</p>
                                                     </article>
                                                     <article>
-                                                        <span>02 · 서로를 위한 힌트</span>
-                                                        <h3>힘든 날의 위로</h3>
+                                                        <span>서로를 위한 힌트</span>
+                                                        <h2>힘든 날의 위로</h2>
                                                         <p>{report.comfort}</p>
                                                     </article>
                                                     <article>
-                                                        <span>03 · 오래 남을 장면</span>
-                                                        <h3>각자의 마음에 남은 기억</h3>
+                                                        <span>오래 남을 장면</span>
+                                                        <h2>각자의 마음에 남은 기억</h2>
                                                         <p>서로가 고른 장면을 천천히 읽어 보세요. 같은 하루를 다르게 기억하고 있을 수도 있어요.</p>
                                                         {report.memory && (
                                                             <div className="report-memories">
@@ -742,7 +747,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                                         )}
                                                     </article>
                                                 </div>
-                                                <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격 을 진단하지 않습니다.</p>
+                                                <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격을 진단하지 않습니다.</p>
                                                 <button
                                                     className="action secondary"
                                                     onClick={() => {

@@ -1,5 +1,5 @@
 /* Lucian UX/UI Prompt #015 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#015 */
-.u015{--ux-surface:#fff;--ux-ink:var(--ink,#343956);--ux-ink-2:#69738e;--ux-ink-3:#7e849d;--ux-line:#e6e5f0;--ux-line-2:#c9cbe0;--ux-accent:#9698d4;--ux-accent-soft:#f0effa;--ux-ease:cubic-bezier(.2,.8,.2,1);--ux-spring:cubic-bezier(.34,1.45,.64,1);max-width:100%;margin-inline:auto;font:inherit;word-break:keep-all;overflow-wrap:break-word}
+.u015{--ux-surface:#fff;--ux-ink:var(--ink,#343956);--ux-ink-2:#535e79;--ux-ink-3:#535e79;--ux-line:#e6e5f0;--ux-line-2:#8a8da8;--ux-accent:#7476b0;--ux-accent-soft:#f0effa;--ux-ease:cubic-bezier(.2,.8,.2,1);--ux-spring:cubic-bezier(.34,1.45,.64,1);max-width:100%;margin-inline:auto;font:inherit;word-break:keep-all;overflow-wrap:break-word}
 .u015,.u015 *,.u015 *::before,.u015 *::after{box-sizing:border-box}
 .u015 button{font:inherit;cursor:pointer}
 .u015 button:disabled{cursor:default;opacity:.65}

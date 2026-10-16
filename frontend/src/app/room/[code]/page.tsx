@@ -3,7 +3,8 @@
 import {use, useCallback, useEffect, useRef, useState} from 'react';
 import type {FormEvent} from 'react';
 import Link from 'next/link';
-import {api, readToken, saveToken, RoomState} from '@/lib/api';
+import {api, ApiError, readToken, saveToken, RoomState} from '@/lib/api';
+import {usePolling} from '@/hooks/usePolling';
 import {toPng} from 'html-to-image';
 
 type Question = {
@@ -133,72 +134,60 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     const [sharing, setSharing] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [restored, setRestored] = useState(false);
+    const [pollError, setPollError] = useState('');
+    const [accessBlocked, setAccessBlocked] = useState(false);
+    const onPollError = useCallback((error: unknown) => {
+        setPollError(error instanceof Error ? error.message : '상태를 확인하지 못했습니다.');
+        if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) setAccessBlocked(true);
+    }, []);
 
     useEffect(() => {
-        setToken(readToken(code));
+        setRestored(false);
+        setRoom(null);
+        setResult(null);
+        setPhase('room');
+        setIndex(0);
+        setPollError('');
+        setAccessBlocked(false);
+        try { setToken(readToken(code)); }
+        catch { setError('브라우저 저장소를 사용할 수 없습니다. 저장소 접근을 허용한 뒤 새로고침해 주세요.'); }
     }, [code]);
 
 
-    useEffect(() => {
-        if (!token) return;
-        let cancelled = false;
-        setRestored(false);
-
-        (async () => {
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-
-                if (cancelled) return;
-
-                if (data.allComplete) {
-                    ++requestVersionRef.current;
-                    setResult(data);
-                    setPhase('results');
-                } else if (data.questions?.length) {
-                    const next = Array.from(
-                        {length: 13}, (_, i) => i
-                    ).find(i => !data.questions.some(
-                        q => q.questionIndex === i && q.complete
-                    ));
-
-                    if (next !== undefined && next > 0) {
-                        activeQuestionRef.current = next;
-                        setIndex(next);
-                        setPhase('question');
-                    }
-                }
-            } catch {
-                // 새 방에는 결과 데이터가 없을 수 있습니다.
-            } finally {
-                if (!cancelled) setRestored(true);
+    const restore = useCallback(async (signal: AbortSignal) => {
+        const data = await api<ResultsState>(`/api/v1/rooms/${code}/results`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        if (data.allComplete) {
+            ++requestVersionRef.current;
+            setResult(data);
+            setPhase('results');
+        } else {
+            const next = Array.from({length: 13}, (_, i) => i).find(i =>
+                !data.questions.some(q => q.questionIndex === i && q.complete));
+            if (next !== undefined && next > 0) {
+                activeQuestionRef.current = next;
+                setIndex(next);
+                setPhase('question');
             }
-        })();
-
-        return () => { cancelled = true; };
-    }, [code, token]);
-
-    const refreshRoom = useCallback(async () => {
-        if (!token) return;
-        try {
-            const data = await api<RoomState>(`/api/v1/rooms/${code}`, {
-                headers: {Authorization: `Bearer ${token}`}
-            });
-            setRoom(data);
-            setError('');
-        } catch (e) {
-            setError(e instanceof Error ? e.message : '방 상태를 확인하지 못했습니다.');
         }
+        setPollError('');
+        setRestored(true);
+        return false;
     }, [code, token]);
+    usePolling(restore, !!token && !accessBlocked && !restored, 2200, onPollError);
 
-    useEffect(() => {
-        if (!token) return;
-        void refreshRoom();
-        const timer = setInterval(() => void refreshRoom(), 2200);
-        return () => clearInterval(timer);
-    }, [token, refreshRoom]);
+    const refreshRoom = useCallback(async (signal: AbortSignal) => {
+        const data = await api<RoomState>(`/api/v1/rooms/${code}`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        setRoom(data);
+        setPollError('');
+        return data.status === 'WAITING';
+    }, [code, token]);
+    usePolling(refreshRoom, !!token && !accessBlocked && phase === 'room', 2200, onPollError);
 
     useEffect(() => {
         if (restored && room?.status === 'READY' && phase === 'room') {
@@ -218,8 +207,8 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     }, [phase, countdown]);
 
     // 이전 질문의 API 응답이 다음 질문 화면에 반영되지 않도록 합니다.
-    const refreshAnswer = useCallback(async () => {
-        if (!token || phase !== 'question') return;
+    const refreshAnswer = useCallback(async (signal: AbortSignal) => {
+        if (!token || phase !== 'question') return false;
 
         const requestedIndex = index;
         const version = ++requestVersionRef.current;
@@ -227,29 +216,28 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         try {
             const data = await api<AnswerState>(
                 `/api/v1/rooms/${code}/answers/${requestedIndex}`,
-                {headers: {Authorization: `Bearer ${token}`}}
+                {signal, headers: {Authorization: `Bearer ${token}`}}
             );
 
+            if (signal.aborted) return false;
             if (
                 version !== requestVersionRef.current ||
                 activeQuestionRef.current !== requestedIndex ||
                 data.questionIndex !== requestedIndex
             ) {
-                return;
+                return true;
             }
 
             setAnswerState(data);
+            setPollError('');
 
             if (data.submitted && data.myAnswer) {
                 setAnswer(data.myAnswer);
             }
+            return !data.bothSubmitted;
         } catch (e) {
-            if (
-                version === requestVersionRef.current &&
-                activeQuestionRef.current === requestedIndex
-            ) {
-                setError(e instanceof Error ? e.message : '답변 상태를 불러오지 못했습니다.');
-            }
+            if (signal.aborted) return false;
+            throw e;
         }
     }, [token, phase, code, index]);
 
@@ -259,16 +247,9 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         setAnswerState(null);
         setAnswer('');
 
-        if (phase !== 'question') return;
-
-        void refreshAnswer();
-        const timer = setInterval(() => void refreshAnswer(), 1800);
-
-        return () => {
-            clearInterval(timer);
-            ++requestVersionRef.current;
-        };
-    }, [phase, index, refreshAnswer]);
+        return () => { ++requestVersionRef.current; };
+    }, [phase, index]);
+    usePolling(refreshAnswer, !!token && !accessBlocked && phase === 'question', 1800, onPollError);
 
     async function join(e: FormEvent) {
         e.preventDefault();
@@ -306,7 +287,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     async function submitAnswer(e: FormEvent) {
         e.preventDefault();
 
-        if (!token || busy || !answer.trim() || answerState?.submitted) return;
+        if (!token || accessBlocked || busy || !answer.trim() || answerState?.submitted) return;
 
         const submittedIndex = index;
         const submittedAnswer = answer.trim();
@@ -345,7 +326,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     }
 
     async function nextQuestion() {
-        if (!answerState?.bothSubmitted || answerState.questionIndex !== index) return;
+        if (accessBlocked || !answerState?.bothSubmitted || answerState.questionIndex !== index) return;
 
         ++requestVersionRef.current;
 
@@ -356,44 +337,22 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
             setIndex(v => v + 1);
         } else {
             setPhase('results');
-
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                setResult(data);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : '결과를 불러오지 못했습니다.');
-            }
         }
     }
 
-    useEffect(() => {
-        if (phase !== 'results' || !token) return;
-
-        let live = true;
-
-        async function load() {
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                if (live) setResult(data);
-            } catch {}
-        }
-
-        void load();
-        const timer = setInterval(() => void load(), 2000);
-
-        return () => {
-            live = false;
-            clearInterval(timer);
-        };
-    }, [phase, token, code]);
+    const refreshResults = useCallback(async (signal: AbortSignal) => {
+        const data = await api<ResultsState>(`/api/v1/rooms/${code}/results`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        setResult(data);
+        setPollError('');
+        return !data.allComplete;
+    }, [code, token]);
+    usePolling(refreshResults, phase === 'results' && !!token && !accessBlocked && !result?.allComplete, 2000, onPollError);
 
     async function getShareUrl(): Promise<string> {
+        if (accessBlocked) throw new Error('방에 접근할 수 없습니다. 만료 또는 인증 상태를 확인해 주세요.');
         if (!token || !result?.allComplete) throw new Error('결과를 모두 완료한 뒤 공유할 수 있습니다.');
         const shared = await api<{shareToken: string; sharePath: string}>(
             `/api/v1/rooms/${encodeURIComponent(code)}/share`,
@@ -735,7 +694,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                             <p className="muted char-count">{answer.length}/1000</p>
                                         </>
                                     )}
-                                    <button className="action" disabled={busy || !answer.trim()}>
+                                    <button className="action" disabled={accessBlocked || busy || !answer.trim()}>
                                         {busy ? '제출 중…' : '답변 제출하기 →'}
                                     </button>
                                     <p className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
@@ -833,7 +792,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                         </>
                     )}
 
-                    {error && <p role="alert" className="error-text">{error}</p>}
+                    {(error || pollError) && <p role="alert" className="error-text">{error || pollError}</p>}
                 </section>
             </div>
         </main>

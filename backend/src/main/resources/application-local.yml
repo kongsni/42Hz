@@ -1,0 +1,9 @@
+# Explicit local-only opt-in. No fallback to the existing development database.
+# Supply an isolated JDBC endpoint and credentials before selecting this profile.
+spring:
+  datasource:
+    url: ${LOCAL_DB_URL}
+    username: ${LOCAL_DB_USER}
+    password: ${LOCAL_DB_PASSWORD}
+  flyway:
+    enabled: true

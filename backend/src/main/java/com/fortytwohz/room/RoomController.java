@@ -9,7 +9,7 @@ public class RoomController {
     private final RoomService service;
     public RoomController(RoomService service) { this.service = service; }
     public record NicknameRequest(@NotBlank @Size(max=16) String nickname) {}
-    public record AnswerRequest(@Min(0) @Max(12) int questionIndex, @NotBlank @Size(max=1000) String answer) {}
+    public record AnswerRequest(@NotNull @Min(0) @Max(12) Integer questionIndex, @NotBlank @Size(max=1000) String answer) {}
     @PostMapping @ResponseStatus(HttpStatus.CREATED)
     public RoomService.CreateRoomResponse create(@Valid @RequestBody NicknameRequest body) { return service.create(body.nickname()); }
     @PostMapping("/{code}/join") @ResponseStatus(HttpStatus.CREATED)

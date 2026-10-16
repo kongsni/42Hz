@@ -11,6 +11,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class SharedResultService {
@@ -66,10 +68,10 @@ public class SharedResultService {
         int matched = 0;
         int different = 0;
 
-        for (int i = 0; i < 13; i++) {
-
-            List<Answer> list =
-                    answers.findByRoomAndQuestionIndex(room, i);
+        Map<Integer, List<Answer>> byQuestion = answers.findByRoomOrderByQuestionIndexAsc(room)
+                .stream().collect(Collectors.groupingBy(Answer::getQuestionIndex));
+        for (int i = 0; i < QuestionCatalog.TOTAL_QUESTIONS; i++) {
+            List<Answer> list = byQuestion.getOrDefault(i, List.of());
 
             if (list.size() != 2) {
                 throw new ResponseStatusException(
@@ -79,7 +81,7 @@ public class SharedResultService {
             }
 
             // 마지막 주관식 질문은 일치율 계산에서 제외
-            if (i < 12) {
+            if (i < QuestionCatalog.CHOICE_QUESTIONS) {
                 String first = list.get(0).getAnswer();
                 String second = list.get(1).getAnswer();
 
@@ -146,6 +148,9 @@ public class SharedResultService {
     }
 
     private void authenticate(Room room, String bearer) {
+        if (room.isExpired()) {
+            throw new ResponseStatusException(HttpStatus.GONE, "만료된 방입니다.");
+        }
 
         if (bearer == null
                 || !bearer.startsWith("Bearer ")

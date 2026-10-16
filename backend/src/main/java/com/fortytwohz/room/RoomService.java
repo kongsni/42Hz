@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -21,15 +22,18 @@ public class RoomService {
     private final RoomRepository rooms;
     private final ParticipantRepository participants;
     private final AnswerRepository answers;
+    private final Clock clock;
 
     public RoomService(
             RoomRepository rooms,
             ParticipantRepository participants,
-            AnswerRepository answers
+            AnswerRepository answers,
+            Clock clock
     ) {
         this.rooms = rooms;
         this.participants = participants;
         this.answers = answers;
+        this.clock = clock;
     }
 
     @Transactional
@@ -40,7 +44,7 @@ public class RoomService {
             code = randomString(ALPHABET, 8);
         } while (rooms.existsByInviteCode(code));
 
-        Room room = rooms.save(new Room(code));
+        Room room = rooms.save(new Room(code, clock.instant()));
         String token = token();
 
         participants.save(
@@ -63,7 +67,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -94,7 +98,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -146,7 +150,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -189,7 +193,7 @@ public class RoomService {
         }
 
         answers.save(
-                new Answer(room, me, questionIndex, value)
+                new Answer(room, me, questionIndex, value, clock.instant())
         );
 
         return answerStateFor(room, me, questionIndex);
@@ -308,7 +312,7 @@ public class RoomService {
     }
 
     private Participant authenticate(Room room, String bearer) {
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 

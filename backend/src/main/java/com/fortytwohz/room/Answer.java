@@ -14,9 +14,9 @@ public class Answer {
     @Column(nullable = false, length = 1000) private String answer;
     @Column(name = "submitted_at", nullable = false) private Instant submittedAt;
     protected Answer() {}
-    public Answer(Room room, Participant participant, int questionIndex, String answer) {
+    public Answer(Room room, Participant participant, int questionIndex, String answer, Instant now) {
         this.id = UUID.randomUUID(); this.room = room; this.participant = participant;
-        this.questionIndex = questionIndex; this.answer = answer; this.submittedAt = Instant.now();
+        this.questionIndex = questionIndex; this.answer = answer; this.submittedAt = now;
     }
     public UUID getId() { return id; }
     public Room getRoom() { return room; }
@@ -24,5 +24,5 @@ public class Answer {
     public int getQuestionIndex() { return questionIndex; }
     public String getAnswer() { return answer; }
     public Instant getSubmittedAt() { return submittedAt; }
-    public void update(String value) { this.answer = value; this.submittedAt = Instant.now(); }
+    public void update(String value, Instant now) { this.answer = value; this.submittedAt = now; }
 }

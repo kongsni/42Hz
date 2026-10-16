@@ -31,6 +31,7 @@ class FlywayMigrationTest {
     @AfterAll static void stopIsolatedDatabase() { POSTGRES.stop(); }
 
     @BeforeEach void createFreshSchema() throws Exception {
+        TestTime.now = null;
         schema = "test_" + UUID.randomUUID().toString().replace("-", "");
         try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              Statement statement = connection.createStatement()) {
@@ -59,7 +60,7 @@ class FlywayMigrationTest {
                 "--spring.jpa.properties.hibernate.default_schema=" + schema,
                 "--server.port=0", "--spring.main.banner-mode=off"));
         args.addAll(List.of(extra));
-        return new SpringApplicationBuilder(FortytwohzApplication.class)
+        return new SpringApplicationBuilder(FortytwohzApplication.class, TestTime.class)
                 .web(web ? WebApplicationType.SERVLET : WebApplicationType.NONE)
                 .run(args.toArray(String[]::new));
     }
@@ -70,7 +71,12 @@ class FlywayMigrationTest {
     }
 
     private List<Map<String, Object>> snapshot(String table) {
-        return jdbc.queryForList("SELECT * FROM " + table + " ORDER BY id");
+        String columns = switch (table) {
+            case "rooms" -> "id, invite_code, status, created_at, expires_at";
+            case "shared_results" -> "id, room_id, share_token, matched_count, different_count, created_at";
+            default -> "*";
+        };
+        return jdbc.queryForList("SELECT " + columns + " FROM " + table + " ORDER BY id");
     }
     private int tableCount(String name) {
         return jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema=? AND table_name=?",
@@ -85,7 +91,7 @@ class FlywayMigrationTest {
             for (String table : List.of("rooms", "participants", "answers", "shared_results")) assertEquals(1, tableCount(table));
         }
         assertEquals(0, flyway().migrate().migrationsExecuted);
-        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class));
         assertTrue(flyway().validateWithResult().validationSuccessful);
         assertEquals(5, jdbc.queryForObject("SELECT count(*) FROM information_schema.table_constraints WHERE table_schema=? AND constraint_type='UNIQUE'", Integer.class, schema));
         assertEquals(4, jdbc.queryForObject("SELECT count(*) FROM information_schema.table_constraints WHERE table_schema=? AND constraint_type='FOREIGN KEY'", Integer.class, schema));
@@ -111,10 +117,16 @@ class FlywayMigrationTest {
         }
     }
 
-    @Test void hibernateCreatedLegacyDatabaseRequiresExplicitBaselineAndPreservesAllData() throws Exception {
-        // Only CREATE in a fresh, test-owned schema. Never use Hibernate create-drop or ddl-auto=create.
-        try (var ignored = app(false, "--spring.flyway.enabled=false", "--spring.jpa.hibernate.ddl-auto=none",
-                "--spring.jpa.properties.jakarta.persistence.schema-generation.database.action=create")) { }
+    @Test void v1LegacyDatabaseRequiresExplicitBaselineAndPreservesAllData() throws Exception {
+        // Reproduce the pre-V2 schema without creating a Flyway history table.
+        new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                new ClassPathResource("db/migration/V1__initial_schema.sql"))
+                .execute(Objects.requireNonNull(jdbc.getDataSource()));
+        // Legacy Hibernate names need not match V1 names; V2 must not rely on FK names.
+        jdbc.execute("ALTER TABLE participants RENAME CONSTRAINT fk_participants_room TO legacy_participant_room");
+        jdbc.execute("ALTER TABLE answers RENAME CONSTRAINT fk_answers_room TO legacy_answer_room");
+        jdbc.execute("ALTER TABLE answers RENAME CONSTRAINT fk_answers_participant TO legacy_answer_participant");
+        jdbc.execute("ALTER TABLE shared_results RENAME CONSTRAINT fk_shared_results_room TO legacy_share_room");
         UUID room = UUID.randomUUID(), first = UUID.randomUUID(), second = UUID.randomUUID();
         jdbc.update("INSERT INTO rooms(id,invite_code,status,created_at,expires_at) VALUES (?,?,'READY',now(),now()+interval '1 day')", room, "LEGACY01");
         jdbc.update("INSERT INTO participants(id,room_id,nickname,token_hash) VALUES (?,?,?,?)", first, room, "나", hash("legacy-first"));
@@ -129,7 +141,7 @@ class FlywayMigrationTest {
         assertThrows(FlywayException.class, () -> flyway().migrate());
         assertEquals(0, tableCount("flyway_schema_history"));
         flyway().baseline();
-        assertEquals(0, flyway().migrate().migrationsExecuted);
+        assertEquals(1, flyway().migrate().migrationsExecuted);
         assertEquals("BASELINE", jdbc.queryForObject("SELECT type FROM flyway_schema_history WHERE version='1'", String.class));
         try (var context = app(false, "--spring.flyway.enabled=true")) {
             var shared = context.getBean(com.fortytwohz.room.SharedResultService.class).getSharedResult("3".repeat(64));
@@ -146,7 +158,7 @@ class FlywayMigrationTest {
         Flyway broken = flyway("classpath:db/migration", "classpath:db/failing");
         assertThrows(FlywayException.class, broken::migrate);
         assertEquals(0, tableCount("migration_rollback_probe"));
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE version='2'", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE version='3'", Integer.class));
         assertEquals(0, flyway().migrate().migrationsExecuted);
         assertTrue(flyway().validateWithResult().validationSuccessful);
     }
@@ -155,6 +167,9 @@ class FlywayMigrationTest {
         flyway().migrate();
         String original = new ClassPathResource("db/migration/V1__initial_schema.sql").getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
         Files.writeString(directory.resolve("V1__initial_schema.sql"), original.replace("varchar(12)", "varchar(13)"));
+        Files.writeString(directory.resolve("V2__add_share_lifecycle.sql"),
+                new ClassPathResource("db/migration/V2__add_share_lifecycle.sql")
+                        .getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
         assertThrows(FlywayException.class, () -> flyway("filesystem:" + directory).validate());
         assertTrue(flyway().validateWithResult().validationSuccessful);
     }
@@ -214,6 +229,11 @@ class FlywayMigrationTest {
             var publicResult = request(base + "/shared-results/" + token, "GET", null, null, 200);
             assertEquals(12, (int) publicResult.read("$.matched"));
             assertFalse(publicResult.jsonString().contains("기억하고 싶은 하루"));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM shared_results WHERE expires_at=created_at+interval '168 hours'", Integer.class));
+            context.getBean(com.fortytwohz.room.SharedResultService.class).revokeShare(code, "Bearer " + second);
+            request(base + "/shared-results/" + token, "GET", null, null, 404);
+            assertEquals(true, request(room + "/results", "GET", null, first, 200).read("$.allComplete"));
+            assertEquals(true, request(room + "/results", "GET", null, second, 200).read("$.allComplete"));
         }
     }
 
@@ -226,6 +246,187 @@ class FlywayMigrationTest {
             var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(expected, response.statusCode(), method + " " + url + ": " + response.body());
             return JsonPath.parse(response.body());
+        }
+    }
+    @Test void migratedShareExpiresAtOriginalSevenDayBoundaryWithoutRenewal() throws Exception {
+        try (var context = app(true, "--spring.flyway.enabled=true")) {
+            var roomService = context.getBean(com.fortytwohz.room.RoomService.class);
+            var sharing = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            var room = roomService.create("나");
+            String token = "7".repeat(64);
+            jdbc.update("INSERT INTO shared_results(id,room_id,share_token,matched_count,different_count,created_at,expires_at) SELECT ?,id,?,12,0,created_at,created_at+interval '168 hours' FROM rooms WHERE invite_code=?", UUID.randomUUID(), token, room.roomCode());
+            var created = jdbc.queryForObject("SELECT created_at FROM shared_results", java.time.OffsetDateTime.class).toInstant();
+            TestTime.now = created.plusSeconds(604800).minusNanos(1);
+            assertEquals(12, sharing.getSharedResult(token).matched());
+            TestTime.now = created.plusSeconds(604800);
+            assertStatus(410, () -> sharing.getSharedResult(token));
+            try (var client = HttpClient.newHttpClient()) {
+                var response = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                        + context.getEnvironment().getProperty("local.server.port") + "/api/v1/shared-results/" + token))
+                        .GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(410, response.statusCode());
+                assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+            }
+            assertStatus(410, () -> sharing.createShare(room.roomCode(), "Bearer " + room.participantToken()));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM shared_results", Integer.class));
+            assertEquals(created, jdbc.queryForObject("SELECT created_at FROM shared_results", java.time.OffsetDateTime.class).toInstant());
+        }
+    }
+
+    @Test void eitherParticipantCanRevokeIdempotentlyAndPrivateResultsRemainAvailable() throws Exception {
+        try (var context = app(true, "--spring.flyway.enabled=true")) {
+            String base = "http://127.0.0.1:" + context.getEnvironment().getProperty("local.server.port") + "/api/v1";
+            var rooms = context.getBean(com.fortytwohz.room.RoomService.class);
+            var share = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            var first = rooms.create("나");
+            var second = rooms.join(first.roomCode(), "상대");
+            String token = seedShare(first.roomCode());
+            assertStatus(401, () -> share.revokeShare(first.roomCode(), "Bearer wrong"));
+            assertEquals(12, share.getSharedResult(token).matched());
+            for (String bearer : List.of(second.participantToken(), first.participantToken())) {
+                try (var client = HttpClient.newHttpClient()) {
+                    var response = client.send(HttpRequest.newBuilder(URI.create(base + "/rooms/" + first.roomCode() + "/share"))
+                            .header("Authorization", "Bearer " + bearer).DELETE().build(), HttpResponse.BodyHandlers.ofString());
+                    assertEquals(204, response.statusCode());
+                    assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+                }
+            }
+            assertStatus(404, () -> share.getSharedResult(token));
+            assertStatus(409, () -> share.createShare(first.roomCode(), "Bearer " + first.participantToken()));
+            assertStatus(409, () -> share.createShare(first.roomCode(), "Bearer " + second.participantToken()));
+            assertFalse(rooms.results(first.roomCode(), "Bearer " + first.participantToken()).allComplete());
+            try (var client = HttpClient.newHttpClient()) {
+                var response = client.send(HttpRequest.newBuilder(URI.create(base + "/shared-results/" + token)).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(404, response.statusCode());
+                assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+                for (String origin : List.of("https://42-hz.vercel.app", "http://localhost:3000", "https://untrusted.example")) {
+                    var cors = client.send(HttpRequest.newBuilder(URI.create(base + "/rooms/" + first.roomCode() + "/share"))
+                            .header("Origin", origin).header("Access-Control-Request-Method", "DELETE")
+                            .header("Access-Control-Request-Headers", "Authorization").method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+                    assertEquals(origin.contains("untrusted") ? 403 : 200, cors.statusCode());
+                    if (!origin.contains("untrusted")) assertEquals(origin, cors.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
+                }
+            }
+        }
+    }
+
+    @Test void revokeWithoutSharePreventsFirstCreationAndExpiredRoomCannotRevoke() {
+        try (var context = app(false, "--spring.flyway.enabled=true")) {
+            var rooms = context.getBean(com.fortytwohz.room.RoomService.class);
+            var share = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            var room = rooms.create("나");
+            share.revokeShare(room.roomCode(), "Bearer " + room.participantToken());
+            assertStatus(409, () -> share.createShare(room.roomCode(), "Bearer " + room.participantToken()));
+            TestTime.now = jdbc.queryForObject("SELECT expires_at FROM rooms", java.time.OffsetDateTime.class).toInstant();
+            assertStatus(410, () -> share.revokeShare(room.roomCode(), "Bearer " + room.participantToken()));
+            assertStatus(410, () -> rooms.results(room.roomCode(), "Bearer " + room.participantToken()));
+        }
+    }
+
+    @Test void revokeDeletionFailureRollsBackRoomBlockAndTokenRemovalTogether() {
+        try (var context = app(false, "--spring.flyway.enabled=true")) {
+            var room = context.getBean(com.fortytwohz.room.RoomService.class).create("나");
+            String token = seedShare(room.roomCode());
+            jdbc.execute("CREATE TABLE revoke_failure_probe (share_id uuid REFERENCES shared_results(id))");
+            jdbc.update("INSERT INTO revoke_failure_probe SELECT id FROM shared_results");
+            var share = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
+                    () -> share.revokeShare(room.roomCode(), "Bearer " + room.participantToken()));
+            assertFalse(jdbc.queryForObject("SELECT sharing_blocked FROM rooms", Boolean.class));
+            assertEquals(12, share.getSharedResult(token).matched());
+        }
+    }
+
+    @Test void createAndRevokeSerializeOnTheSameRoomLockInBothOrders() throws Exception {
+        try (var context = app(false, "--spring.flyway.enabled=true")) {
+            var rooms = context.getBean(com.fortytwohz.room.RoomService.class);
+            var share = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            var tx = new org.springframework.transaction.support.TransactionTemplate(context.getBean(org.springframework.transaction.PlatformTransactionManager.class));
+            for (boolean revokeFirst : List.of(false, true)) {
+                var room = rooms.create("나");
+                rooms.join(room.roomCode(), "상대");
+                var token = new java.util.concurrent.atomic.AtomicReference<String>();
+                if (revokeFirst) token.set(seedShare(room.roomCode()));
+                else jdbc.update("INSERT INTO answers(id,room_id,participant_id,question_index,answer,submitted_at) SELECT gen_random_uuid(),p.room_id,p.id,q,'같음',r.created_at FROM participants p JOIN rooms r ON r.id=p.room_id CROSS JOIN generate_series(0,12) q WHERE r.invite_code=?", room.roomCode());
+                var held = new java.util.concurrent.CountDownLatch(1);
+                var release = new java.util.concurrent.CountDownLatch(1);
+                try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                    var first = executor.submit(() -> tx.execute(status -> {
+                        if (revokeFirst) share.revokeShare(room.roomCode(), "Bearer " + room.participantToken());
+                        else token.set(share.createShare(room.roomCode(), "Bearer " + room.participantToken()).shareToken());
+                        held.countDown();
+                        try { if (!release.await(15, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("test lock timeout"); }
+                        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+                        return null;
+                    }));
+                    try {
+                        assertTrue(held.await(15, java.util.concurrent.TimeUnit.SECONDS));
+                        var second = executor.submit(() -> {
+                            if (revokeFirst) assertStatus(409, () -> share.createShare(room.roomCode(), "Bearer " + room.participantToken()));
+                            else share.revokeShare(room.roomCode(), "Bearer " + room.participantToken());
+                        });
+                        // Observe actual PostgreSQL blocking, not a timing guess about thread scheduling.
+                        long until = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+                        while (jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0", Integer.class) == 0 && System.nanoTime() < until) Thread.sleep(10);
+                        assertTrue(jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0", Integer.class) > 0);
+                        assertFalse(second.isDone());
+                        release.countDown();
+                        first.get(15, java.util.concurrent.TimeUnit.SECONDS);
+                        second.get(15, java.util.concurrent.TimeUnit.SECONDS);
+                        // Fresh transaction starts after the revoke transaction has committed.
+                        assertStatus(404, () -> share.getSharedResult(token.get()));
+                        assertStatus(409, () -> share.createShare(room.roomCode(), "Bearer " + room.participantToken()));
+                    } finally { release.countDown(); }
+                }
+            }
+        }
+    }
+
+    @Test void v1ToV2BackfillsOriginalTimesAndQuarantinesOnlyInvalidRows() {
+        Flyway.configure().dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
+                .schemas(schema).defaultSchema(schema).target("1").cleanDisabled(true).baselineOnMigrate(false).load().migrate();
+        for (int i = 0; i < 4; i++) {
+            String time = switch (i) { case 0 -> "now()-interval '8 days'"; case 1 -> "now()"; case 2 -> "now()+interval '1 day'"; default -> "'infinity'::timestamptz"; };
+            UUID id = UUID.randomUUID();
+            jdbc.update("INSERT INTO rooms VALUES (?,?,'READY'," + time + "," + time + "+interval '24 hours')", id, "TIME000" + i);
+            jdbc.update("INSERT INTO shared_results VALUES (?,?,?,12,0," + time + ")", UUID.randomUUID(), id, Integer.toString(i).repeat(64));
+        }
+        var original = snapshot("shared_results");
+        assertEquals(1, flyway().migrate().migrationsExecuted);
+        assertEquals(original, snapshot("shared_results"));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM shared_results WHERE retention_review_required", Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM rooms WHERE retention_review_required", Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM shared_results WHERE expires_at=created_at+interval '168 hours' AND NOT retention_review_required", Integer.class));
+        try (var context = app(false)) {
+            var share = context.getBean(com.fortytwohz.room.SharedResultService.class);
+            assertStatus(410, () -> share.getSharedResult("0".repeat(64)));
+            assertEquals(12, share.getSharedResult("1".repeat(64)).matched());
+            for (String bad : List.of("2", "3")) assertStatus(410, () -> share.getSharedResult(bad.repeat(64)));
+        }
+        assertEquals(0, flyway().migrate().migrationsExecuted);
+    }
+
+    private String seedShare(String code) {
+        String token = UUID.randomUUID().toString().replace("-", "").repeat(2);
+        jdbc.update("INSERT INTO shared_results(id,room_id,share_token,matched_count,different_count,created_at,expires_at) SELECT ?,id,?,12,0,created_at,created_at+interval '168 hours' FROM rooms WHERE invite_code=?", UUID.randomUUID(), token, code);
+        return token;
+    }
+
+    private void assertStatus(int status, org.junit.jupiter.api.function.Executable action) {
+        assertEquals(status, assertThrows(org.springframework.web.server.ResponseStatusException.class, action).getStatusCode().value());
+    }
+
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class TestTime {
+        static volatile java.time.Instant now;
+        @org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Primary
+        java.time.Clock controlledClock() {
+            return new java.time.Clock() {
+                public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+                public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+                public java.time.Instant instant() { return now == null ? java.time.Instant.now() : now; }
+            };
         }
     }
 }

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -21,6 +22,7 @@ public class SharedResultService {
     private final ParticipantRepository participants;
     private final AnswerRepository answers;
     private final SharedResultRepository sharedResults;
+    private final Clock clock;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -28,12 +30,14 @@ public class SharedResultService {
             RoomRepository rooms,
             ParticipantRepository participants,
             AnswerRepository answers,
-            SharedResultRepository sharedResults
+            SharedResultRepository sharedResults,
+            Clock clock
     ) {
         this.rooms = rooms;
         this.participants = participants;
         this.answers = answers;
         this.sharedResults = sharedResults;
+        this.clock = clock;
     }
 
     @Transactional
@@ -47,6 +51,10 @@ public class SharedResultService {
 
         authenticate(room, bearer);
 
+        if (room.isSharingBlocked()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "공유가 철회된 방에서는 다시 공유할 수 없습니다.");
+        }
+
         if (room.getStatus() != RoomStatus.READY) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
@@ -59,6 +67,7 @@ public class SharedResultService {
                 .orElse(null);
 
         if (existing != null) {
+            requireActive(existing);
             return new ShareResponse(
                     existing.getShareToken(),
                     "/share/" + existing.getShareToken()
@@ -99,7 +108,7 @@ public class SharedResultService {
         String token = HexFormat.of().formatHex(bytes);
 
         SharedResult shared = sharedResults.save(
-                new SharedResult(room, token, matched, different)
+                new SharedResult(room, token, matched, different, clock.instant())
         );
 
         return new ShareResponse(
@@ -117,6 +126,8 @@ public class SharedResultService {
                         HttpStatus.NOT_FOUND,
                         "공유 결과를 찾을 수 없습니다."
                 ));
+
+        requireActive(shared);
 
         int matched = shared.getMatchedCount();
         int different = shared.getDifferentCount();
@@ -147,8 +158,24 @@ public class SharedResultService {
         );
     }
 
+    @Transactional
+    public void revokeShare(String code, String bearer) {
+        Room room = rooms.findLockedByCode(code)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "방을 찾을 수 없습니다."));
+        authenticate(room, bearer);
+        room.blockSharing();
+        sharedResults.findByRoom(room).ifPresent(sharedResults::delete);
+        // The room flag and token removal commit together under the same Room row lock.
+    }
+
+    private void requireActive(SharedResult shared) {
+        if (shared.isExpired(clock.instant())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "만료되었거나 확인이 필요한 공유 결과입니다.");
+        }
+    }
+
     private void authenticate(Room room, String bearer) {
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw new ResponseStatusException(HttpStatus.GONE, "만료된 방입니다.");
         }
 

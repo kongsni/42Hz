@@ -7,3 +7,11 @@
 @keyframes drift{from{transform:translateY(-6px)}to{transform:translateY(6px)}}
 @media(max-width:700px){.nav{padding:20px}.links,.topCta{display:none}.content{padding:54px 18px 35px}.brand{letter-spacing:-5px}.kicker{letter-spacing:2.5px;font-size:9px}.headline{letter-spacing:-.5px}.cta{padding:16px 24px}.meta{gap:12px;font-size:11px;flex-wrap:wrap}.hero:before,.hero:after{top:37%;height:25vh}}
 @media(prefers-reduced-motion:reduce){.waves path{animation:none}.cta{transition:none}}
+
+/* Low-amplitude movement, like two slowly breathing signals. */
+.blue,.pink{transform-box:fill-box;transform-origin:center;will-change:transform}
+.blue{animation:signalBlue 8s ease-in-out infinite}
+.pink{animation:signalPink 9s ease-in-out -3s infinite}
+@keyframes signalBlue{0%,100%{transform:translate(-3px,-2px) scaleY(.96)}50%{transform:translate(3px,2px) scaleY(1.04)}}
+@keyframes signalPink{0%,100%{transform:translate(3px,2px) scaleY(1.04)}50%{transform:translate(-3px,-2px) scaleY(.96)}}
+@media(prefers-reduced-motion:reduce){.blue,.pink{animation:none;will-change:auto}}

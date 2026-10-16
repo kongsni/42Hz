@@ -17,3 +17,44 @@
 
 /* MVP 1: relationship selection, question hierarchy, result navigation */
 .selection-shell{width:min(720px,100%);margin:clamp(50px,10vh,100px) auto 50px;text-align:center}.selection-shell>h1{font-size:clamp(26px,4vw,38px);letter-spacing:-1.5px;margin:16px 0 10px;color:#353a58}.selection-grid{display:grid;gap:14px;margin:32px 0}.selection-card{display:flex;align-items:center;gap:22px;text-align:left;padding:25px 28px;border-radius:22px;background:#ffffffd9;border:1px solid #e9e7f2;box-shadow:0 14px 36px #a6a6ca16;text-decoration:none;color:#393e5e;transition:transform .2s,box-shadow .2s}.selection-card.available:hover{transform:translateY(-3px);box-shadow:0 20px 46px #b6a8d12e}.selection-card.available{border-color:#dfc8e9;background:linear-gradient(110deg,#f4f7ff,#fff5fc)}.selection-card.unavailable{opacity:.65}.selection-icon{display:grid;place-items:center;flex:0 0 58px;height:58px;border-radius:19px;background:linear-gradient(140deg,#dceaff,#f5d9ed);font-size:29px;color:#8580b5}.selection-card strong{font-size:19px;font-weight:700}.selection-card p{margin:6px 0;color:#777c94;font-size:14px}.selection-card small{font-size:12px;color:#9380b7;font-weight:700}.selection-back,.result-home{display:inline-block;color:#7d819c;text-decoration:none;font-size:14px;margin-top:15px}.selection-back:hover,.result-home:hover{text-decoration:underline}.room-shell{width:min(780px,100%)}.room-card>.eyebrow{font-size:12px}.room-card:has(.question-progress)>h1{font-size:clamp(17px,2.3vw,19px);font-weight:550;color:#7e829c;letter-spacing:-.35px;margin:12px 0 5px}.room-card .question-prompt{font-size:clamp(21px,2.8vw,25px);font-weight:650;line-height:1.52;letter-spacing:-.75px;color:#343956;margin:10px 0 26px}.answer-option{font-size:16px;font-weight:500;min-height:60px;padding:16px 18px}.answer-option .option-letter{font-size:14px}.question-progress{font-size:13px}.result-actions{text-align:center;padding:30px 10px 14px;border-top:1px solid #ece7f2;margin-top:16px}.result-actions h2{font-size:clamp(21px,3vw,27px);letter-spacing:-.7px}.result-actions .action{max-width:420px;margin:12px auto}.result-actions .result-home{margin-top:20px}@media(max-width:520px){.selection-card{padding:19px 17px;gap:14px}.selection-icon{flex-basis:48px;height:48px}.selection-card strong{font-size:17px}.room-card .question-prompt{font-size:21px}.answer-option{font-size:16px;padding:13px 12px}}
+
+/* Quiet motion and clearer states for the two-person experience. */
+.room-experience .room-card { padding:clamp(24px,5vw,44px); }
+.room-experience .question-progress { color:#747b98; font-size:11px; letter-spacing:.12em; }
+.room-experience .progress-track { height:5px; margin:14px 0 28px; }
+.room-experience .question-prompt { max-width:580px; margin:12px auto 28px; text-wrap:pretty; }
+.room-experience .room-card:has(.question-progress)>h1,
+.room-experience .room-card:has(.question-progress)>.eyebrow { text-align:center; }
+.room-experience .answer-form { gap:22px; grid-template-columns:minmax(0,1fr); min-width:0; }
+.room-experience .answer-form>.action { max-width:330px; margin:4px auto 0; min-height:52px; }
+.room-experience .answer-form>.small-note { max-width:330px; margin-inline:auto; line-height:1.8; }
+.room-experience .waiting-answer { padding:12px 0 18px; }
+.room-experience .waiting-answer .wave-stage { max-width:340px; margin:12px auto 24px; }
+.flow-badge { display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid #e2e4f1; border-radius:999px; background:#f6f7fd; color:#666d97; font-size:11px; font-weight:650; letter-spacing:.02em; }
+.flow-badge::before { content:''; width:5px; height:5px; border-radius:50%; background:#a5acd9; }
+.room-experience .waiting-answer h2,.room-experience .answer-reveal h2 { font-size:clamp(22px,4vw,28px); letter-spacing:-.04em; line-height:1.5; }
+.room-experience .waiting-answer .muted { font-size:14px; }
+.room-experience .answer-reveal { text-align:center; padding-top:28px; animation:answer-arrive .45s cubic-bezier(.2,.8,.2,1) both; }
+.room-experience .reveal-caption { font-size:13px; margin:0 0 24px; }
+.room-experience .answer-pair { text-align:left; gap:14px; }
+.room-experience .answer-pair>div { padding:22px 20px; border-radius:20px; }
+.room-experience .answer-pair p { font-size:16px; line-height:1.8; }
+.room-experience .answer-reveal>.action { max-width:330px; margin:24px auto 0; }
+.room-experience .action:focus-visible { outline:2px solid #8688bd; outline-offset:4px; }
+.wave-stage .wave-blue { animation:frequency-blue 8s ease-in-out infinite; }
+.wave-stage .wave-pink { animation:frequency-pink 9s ease-in-out infinite; animation-delay:-3s; }
+.wave-stage.is-connected .connection-spark { animation:sparkle-soft 4s ease-in-out infinite; }
+@keyframes frequency-blue { 0%,100%{transform:translate(-2px,0) scaleY(.96);opacity:.82} 50%{transform:translate(2px,-3px) scaleY(1.04);opacity:1} }
+@keyframes frequency-pink { 0%,100%{transform:translate(2px,0) scaleY(1.04);opacity:.9} 50%{transform:translate(-2px,3px) scaleY(.96);opacity:.78} }
+@keyframes answer-arrive { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+@media(max-width:520px) {
+  .room-experience .room-shell { margin-top:24px; }
+  .room-experience .room-card { padding:24px 18px; border-radius:24px; }
+  .room-experience .question-prompt { font-size:21px; line-height:1.65; }
+  .room-experience .answer-pair>div { padding:18px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .wave-stage .wave-blue,.wave-stage .wave-pink,.wave-stage .connection-spark,
+  .room-experience .answer-reveal,.room-experience .countdown-number { animation:none!important; }
+  .room-experience .progress-track>div,.room-experience .action { transition:none!important; }
+}

@@ -1,9 +1,10 @@
 'use client';
 
-import {use, useCallback, useEffect, useRef, useState} from 'react';
+import {use, useCallback, useEffect, useId, useRef, useState} from 'react';
 import type {FormEvent} from 'react';
 import Link from 'next/link';
 import {api, ApiError, readToken, saveToken, RoomState} from '@/lib/api';
+import {AnswerChoices} from '@/components/AnswerChoices';
 import {usePolling} from '@/hooks/usePolling';
 import {toPng} from 'html-to-image';
 
@@ -36,7 +37,7 @@ type ResultsState = {
 };
 
 const QUESTIONS: Question[] = [
-    {type:'choice',title:'갑자기 계획이 바뀌었다면',prompt:'여행 출발 3시간 전, 예약한 숙소가 취소됐습니다. 가장 먼저 할 행 동은?',options:['바로 다른 숙소를 찾는다','상대방에게 먼저 상황을 알린다','주변에서 해결할 방법을 찾는다','잠깐 멍해진 뒤 생각한다']},
+    {type:'choice',title:'갑자기 계획이 바뀌었다면',prompt:'여행 출발 3시간 전, 예약한 숙소가 취소됐습니다. 가장 먼저 할 행동은?',options:['바로 다른 숙소를 찾는다','상대방에게 먼저 상황을 알린다','주변에서 해결할 방법을 찾는다','잠깐 멍해진 뒤 생각한다']},
     {type:'choice',title:'쉬는 날의 연락',prompt:'오랜만에 아무 일정 없는 휴일입니다. 가장 마음이 편한 방식은?',options:['하루 종일 같이 보내기','각자 쉬다가 중간중간 연락하기','같은 공간에서 각자 할 일 하기','그날 기분에 따라 정하기']},
     {type:'choice',title:'작은 오해가 생겼을 때',prompt:'대화 중 상대방의 말이 조금 서운하게 느껴졌습니다. 어떻게 할까요?',options:['바로 어떤 부분이 서운했는지 말한다','조금 생각한 뒤 차분히 말한다','상대방의 의도를 먼저 물어본다','일단 넘기고 분위기를 본다']},
     {type:'choice',title:'갑자기 생긴 두 시간',prompt:'약속 장소에 예상보다 두 시간 일찍 도착했습니다. 무엇을 하고 싶나요?',options:['근처를 함께 구경한다','카페에서 오래 이야기한다','각자 하고 싶었던 일을 한다','즉흥적으로 새로운 곳을 찾아본다']},
@@ -85,27 +86,26 @@ function buildReport(result: ResultsState) {
 }
 
 function Wave({connected = false}: {connected?: boolean}) {
+    const id = useId();
     return (
-        <div className="wave-stage" aria-label="서로 다른 리듬으로 흐르는 두 주파수">
-            <svg viewBox="0 0 320 130" role="img">
+        <div className={`wave-stage${connected ? ' is-connected' : ''}`} aria-label="서로 다른 리듬으로 흐르는 두 주파수">
+            <svg viewBox="0 0 320 130" role="img" aria-label="두 사람의 주파수">
                 <defs>
-                    <linearGradient id="blueFlow">
+                    <linearGradient id={`${id}-blue`}>
                         <stop offset="0%" stopColor="#b8d2ff"/>
                         <stop offset="50%" stopColor="#83b2ff"/>
                         <stop offset="100%" stopColor="#b8d2ff">
-                            <animate attributeName="offset" values="100%;0%;100%" dur="7s" repeatCount="indefinite"/>
                         </stop>
                     </linearGradient>
-                    <linearGradient id="pinkFlow">
+                    <linearGradient id={`${id}-pink`}>
                         <stop offset="0%" stopColor="#f0c7e8"/>
                         <stop offset="50%" stopColor="#d59bd3"/>
                         <stop offset="100%" stopColor="#f0c7e8">
-                            <animate attributeName="offset" values="0%;100%;0%" dur="9s" repeatCount="indefinite"/>
                         </stop>
                     </linearGradient>
                 </defs>
-                <path d="M0 32 C18 32 18 10 36 10 S54 54 72 54 S90 10 108 10 S126 54 144 54 S162 10 180 10 S198 54 216 54 S234 10 252 10 S270 54 288 32 S306 32 320 32" stroke="url(#blueFlow)" className="wave-blue"/>
-                <path d="M0 98 C14 98 14 118 28 118 S42 78 56 78 S70 118 84 118 S98 78 112 78 S126 118 140 118 S154 78 168 78 S182 118 196 118 S210 78 224 78 S238 118 252 118 S266 78 280 78 S294 98 320 98" stroke="url(#pinkFlow)" className="wave-pink"/>
+                <path d="M0 32 C18 32 18 10 36 10 S54 54 72 54 S90 10 108 10 S126 54 144 54 S162 10 180 10 S198 54 216 54 S234 10 252 10 S270 54 288 32 S306 32 320 32" stroke={`url(#${id}-blue)`} className="wave-blue"/>
+                <path d="M0 98 C14 98 14 118 28 118 S42 78 56 78 S70 118 84 118 S98 78 112 78 S126 118 140 118 S154 78 168 78 S182 118 196 118 S210 78 224 78 S238 118 252 118 S266 78 280 78 S294 98 320 98" stroke={`url(#${id}-pink)`} className="wave-pink"/>
                 {connected && <circle cx="160" cy="65" r="3" className="connection-spark"/>}
             </svg>
         </div>
@@ -521,7 +521,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         answerState?.questionIndex === index ? answerState : null;
 
     return (
-        <main className="panel-page">
+        <main className="panel-page room-experience">
             <Link className="logo" href="/">42Hz</Link>
             <div className="room-shell">
                 <section className="room-card">
@@ -626,11 +626,11 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                     {phase === 'question' && (
                         <>
-                            <div className="question-progress">
+                            <div className="question-progress" aria-label={`13개 질문 중 ${index + 1}번째`}>
                                 <span>QUESTION {String(index + 1).padStart(2, '0')} / 13</span>
                                 <span>{Math.round(((index + 1) / 13) * 100)}%</span>
                             </div>
-                            <div className="progress-track">
+                            <div className="progress-track" role="progressbar" aria-label="질문 진행률" aria-valuemin={0} aria-valuemax={13} aria-valuenow={index + 1}>
                                 <div style={{width: `${((index + 1) / 13) * 100}%`}}/>
                             </div>
                             <div className="eyebrow" style={{marginTop:28}}>42HZ · OUR EXPERIENCE</div>
@@ -638,9 +638,10 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                             <p className="question-prompt">{question.prompt}</p>
 
                             {visibleAnswerState?.bothSubmitted ? (
-                                <div className="answer-reveal">
-                                    <p className="eyebrow">BOTH ANSWERS SUBMITTED</p>
-                                    <h2>서로의 선택을 확인해 보세요.</h2>
+                                <div className="answer-reveal" key={`reveal-${index}`} role="region" aria-label="두 사람의 답변">
+                                    <span className="flow-badge">두 사람 모두 제출 완료</span>
+                                    <h2>우리의 주파수가 만났어요.</h2>
+                                    <p className="muted reveal-caption">같은 선택도, 다른 선택도 대화의 시작이에요.</p>
                                     <div className="answer-pair">
                                         <div>
                                             <small>나의 답변</small>
@@ -656,10 +657,11 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                     </button>
                                 </div>
                             ) : visibleAnswerState?.submitted ? (
-                                <div className="waiting-answer">
+                                <div className="waiting-answer" role="status" aria-live="polite">
                                     <Wave/>
-                                    <h2>답변을 보관했어요.</h2>
-                                    <p className="muted">상대방이 답변을 제출하면 함께 공개됩니다.</p>
+                                    <span className="flow-badge">내 답변 제출 완료</span>
+                                    <h2>상대방의 리듬을 기다리고 있어요.</h2>
+                                    <p className="muted">서두르지 않아도 괜찮아요.<br/>두 사람의 답변이 모이면 함께 열립니다.</p>
                                     <p className="status-line">
                                         <span className="status-dot"/>
                                         {visibleAnswerState.submittedCount}/2명 제출 완료
@@ -668,19 +670,8 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                             ) : (
                                 <form key={index} onSubmit={submitAnswer} className="answer-form">
                                     {question.type === 'choice' ? (
-                                        question.options?.map((option, i) => (
-                                            <label className={`answer-option ${answer === option ? 'selected' : ''}`} key={option}>
-                                                <input
-                                                    type="radio"
-                                                    name={`q-${index}`}
-                                                    value={option}
-                                                    checked={answer === option}
-                                                    onChange={() => setAnswer(option)}
-                                                />
-                                                <span className="option-letter">{String.fromCharCode(65 + i)}</span>
-                                                <span>{option}</span>
-                                            </label>
-                                        ))
+                                        <AnswerChoices options={question.options ?? []} value={answer}
+                                            onChange={setAnswer} disabled={busy || accessBlocked} />
                                     ) : (
                                         <>
                       <textarea
@@ -710,7 +701,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                             <p className="muted">두 사람의 답변을 나란히 모았어요. 서로 다른 선택도 새로운 발견이 될 수 있습니다.</p>
 
                             {!result?.allComplete ? (
-                                <div className="waiting-answer">
+                                <div className="waiting-answer" role="status" aria-live="polite">
                                     <Wave/>
                                     <p>상대방의 마지막 답변을 기다리고 있어요.</p>
                                 </div>

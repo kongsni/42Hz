@@ -1,9 +1,11 @@
 'use client';
 
-import {use, useCallback, useEffect, useRef, useState} from 'react';
+import {use, useCallback, useEffect, useId, useRef, useState} from 'react';
 import type {FormEvent} from 'react';
 import Link from 'next/link';
-import {api, readToken, saveToken, RoomState} from '@/lib/api';
+import {api, ApiError, readToken, saveToken, RoomState} from '@/lib/api';
+import {AnswerChoices} from '@/components/AnswerChoices';
+import {usePolling} from '@/hooks/usePolling';
 import {toPng} from 'html-to-image';
 
 type Question = {
@@ -35,7 +37,7 @@ type ResultsState = {
 };
 
 const QUESTIONS: Question[] = [
-    {type:'choice',title:'갑자기 계획이 바뀌었다면',prompt:'여행 출발 3시간 전, 예약한 숙소가 취소됐습니다. 가장 먼저 할 행 동은?',options:['바로 다른 숙소를 찾는다','상대방에게 먼저 상황을 알린다','주변에서 해결할 방법을 찾는다','잠깐 멍해진 뒤 생각한다']},
+    {type:'choice',title:'갑자기 계획이 바뀌었다면',prompt:'여행 출발 3시간 전, 예약한 숙소가 취소됐습니다. 가장 먼저 할 행동은?',options:['바로 다른 숙소를 찾는다','상대방에게 먼저 상황을 알린다','주변에서 해결할 방법을 찾는다','잠깐 멍해진 뒤 생각한다']},
     {type:'choice',title:'쉬는 날의 연락',prompt:'오랜만에 아무 일정 없는 휴일입니다. 가장 마음이 편한 방식은?',options:['하루 종일 같이 보내기','각자 쉬다가 중간중간 연락하기','같은 공간에서 각자 할 일 하기','그날 기분에 따라 정하기']},
     {type:'choice',title:'작은 오해가 생겼을 때',prompt:'대화 중 상대방의 말이 조금 서운하게 느껴졌습니다. 어떻게 할까요?',options:['바로 어떤 부분이 서운했는지 말한다','조금 생각한 뒤 차분히 말한다','상대방의 의도를 먼저 물어본다','일단 넘기고 분위기를 본다']},
     {type:'choice',title:'갑자기 생긴 두 시간',prompt:'약속 장소에 예상보다 두 시간 일찍 도착했습니다. 무엇을 하고 싶나요?',options:['근처를 함께 구경한다','카페에서 오래 이야기한다','각자 하고 싶었던 일을 한다','즉흥적으로 새로운 곳을 찾아본다']},
@@ -84,31 +86,37 @@ function buildReport(result: ResultsState) {
 }
 
 function Wave({connected = false}: {connected?: boolean}) {
+    const id = useId();
     return (
-        <div className="wave-stage" aria-label="서로 다른 리듬으로 흐르는 두 주파수">
-            <svg viewBox="0 0 320 130" role="img">
+        <div className={`wave-stage${connected ? ' is-connected' : ''}`} aria-label="서로 다른 리듬으로 흐르는 두 주파수">
+            <svg viewBox="0 0 320 130" role="img" aria-label="두 사람의 주파수">
                 <defs>
-                    <linearGradient id="blueFlow">
+                    <linearGradient id={`${id}-blue`}>
                         <stop offset="0%" stopColor="#b8d2ff"/>
                         <stop offset="50%" stopColor="#83b2ff"/>
                         <stop offset="100%" stopColor="#b8d2ff">
-                            <animate attributeName="offset" values="100%;0%;100%" dur="7s" repeatCount="indefinite"/>
                         </stop>
                     </linearGradient>
-                    <linearGradient id="pinkFlow">
+                    <linearGradient id={`${id}-pink`}>
                         <stop offset="0%" stopColor="#f0c7e8"/>
                         <stop offset="50%" stopColor="#d59bd3"/>
                         <stop offset="100%" stopColor="#f0c7e8">
-                            <animate attributeName="offset" values="0%;100%;0%" dur="9s" repeatCount="indefinite"/>
                         </stop>
                     </linearGradient>
                 </defs>
-                <path d="M0 32 C18 32 18 10 36 10 S54 54 72 54 S90 10 108 10 S126 54 144 54 S162 10 180 10 S198 54 216 54 S234 10 252 10 S270 54 288 32 S306 32 320 32" stroke="url(#blueFlow)" className="wave-blue"/>
-                <path d="M0 98 C14 98 14 118 28 118 S42 78 56 78 S70 118 84 118 S98 78 112 78 S126 118 140 118 S154 78 168 78 S182 118 196 118 S210 78 224 78 S238 118 252 118 S266 78 280 78 S294 98 320 98" stroke="url(#pinkFlow)" className="wave-pink"/>
+                <path d="M0 32 C18 32 18 10 36 10 S54 54 72 54 S90 10 108 10 S126 54 144 54 S162 10 180 10 S198 54 216 54 S234 10 252 10 S270 54 288 32 S306 32 320 32" stroke={`url(#${id}-blue)`} className="wave-blue"/>
+                <path d="M0 98 C14 98 14 118 28 118 S42 78 56 78 S70 118 84 118 S98 78 112 78 S126 118 140 118 S154 78 168 78 S182 118 196 118 S210 78 224 78 S238 118 252 118 S266 78 280 78 S294 98 320 98" stroke={`url(#${id}-pink)`} className="wave-pink"/>
                 {connected && <circle cx="160" cy="65" r="3" className="connection-spark"/>}
             </svg>
         </div>
     );
+}
+
+function AnswerRevealSignal() {
+    return <svg className="answer-signal" viewBox="0 0 320 48" aria-hidden="true" focusable="false">
+        <g className="answer-signal-blue"><path d="M2 24 C45 24 48 5 82 12 S135 42 160 24 S212 5 240 22 S280 40 318 24"/></g>
+        <g className="answer-signal-pink"><path d="M2 24 C45 24 48 43 82 36 S135 6 160 24 S212 43 240 26 S280 8 318 24"/></g>
+    </svg>;
 }
 
 export default function RoomPage({params}: {params: Promise<{code: string}>}) {
@@ -133,72 +141,60 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     const [sharing, setSharing] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [restored, setRestored] = useState(false);
+    const [pollError, setPollError] = useState('');
+    const [accessBlocked, setAccessBlocked] = useState(false);
+    const onPollError = useCallback((error: unknown) => {
+        setPollError(error instanceof Error ? error.message : '상태를 확인하지 못했습니다.');
+        if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) setAccessBlocked(true);
+    }, []);
 
     useEffect(() => {
-        setToken(readToken(code));
+        setRestored(false);
+        setRoom(null);
+        setResult(null);
+        setPhase('room');
+        setIndex(0);
+        setPollError('');
+        setAccessBlocked(false);
+        try { setToken(readToken(code)); }
+        catch { setError('브라우저 저장소를 사용할 수 없습니다. 저장소 접근을 허용한 뒤 새로고침해 주세요.'); }
     }, [code]);
 
 
-    useEffect(() => {
-        if (!token) return;
-        let cancelled = false;
-        setRestored(false);
-
-        (async () => {
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-
-                if (cancelled) return;
-
-                if (data.allComplete) {
-                    ++requestVersionRef.current;
-                    setResult(data);
-                    setPhase('results');
-                } else if (data.questions?.length) {
-                    const next = Array.from(
-                        {length: 13}, (_, i) => i
-                    ).find(i => !data.questions.some(
-                        q => q.questionIndex === i && q.complete
-                    ));
-
-                    if (next !== undefined && next > 0) {
-                        activeQuestionRef.current = next;
-                        setIndex(next);
-                        setPhase('question');
-                    }
-                }
-            } catch {
-                // 새 방에는 결과 데이터가 없을 수 있습니다.
-            } finally {
-                if (!cancelled) setRestored(true);
+    const restore = useCallback(async (signal: AbortSignal) => {
+        const data = await api<ResultsState>(`/api/v1/rooms/${code}/results`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        if (data.allComplete) {
+            ++requestVersionRef.current;
+            setResult(data);
+            setPhase('results');
+        } else {
+            const next = Array.from({length: 13}, (_, i) => i).find(i =>
+                !data.questions.some(q => q.questionIndex === i && q.complete));
+            if (next !== undefined && next > 0) {
+                activeQuestionRef.current = next;
+                setIndex(next);
+                setPhase('question');
             }
-        })();
-
-        return () => { cancelled = true; };
-    }, [code, token]);
-
-    const refreshRoom = useCallback(async () => {
-        if (!token) return;
-        try {
-            const data = await api<RoomState>(`/api/v1/rooms/${code}`, {
-                headers: {Authorization: `Bearer ${token}`}
-            });
-            setRoom(data);
-            setError('');
-        } catch (e) {
-            setError(e instanceof Error ? e.message : '방 상태를 확인하지 못했습니다.');
         }
+        setPollError('');
+        setRestored(true);
+        return false;
     }, [code, token]);
+    usePolling(restore, !!token && !accessBlocked && !restored, 2200, onPollError);
 
-    useEffect(() => {
-        if (!token) return;
-        void refreshRoom();
-        const timer = setInterval(() => void refreshRoom(), 2200);
-        return () => clearInterval(timer);
-    }, [token, refreshRoom]);
+    const refreshRoom = useCallback(async (signal: AbortSignal) => {
+        const data = await api<RoomState>(`/api/v1/rooms/${code}`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        setRoom(data);
+        setPollError('');
+        return data.status === 'WAITING';
+    }, [code, token]);
+    usePolling(refreshRoom, !!token && !accessBlocked && phase === 'room', 2200, onPollError);
 
     useEffect(() => {
         if (restored && room?.status === 'READY' && phase === 'room') {
@@ -218,8 +214,8 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     }, [phase, countdown]);
 
     // 이전 질문의 API 응답이 다음 질문 화면에 반영되지 않도록 합니다.
-    const refreshAnswer = useCallback(async () => {
-        if (!token || phase !== 'question') return;
+    const refreshAnswer = useCallback(async (signal: AbortSignal) => {
+        if (!token || phase !== 'question') return false;
 
         const requestedIndex = index;
         const version = ++requestVersionRef.current;
@@ -227,29 +223,28 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         try {
             const data = await api<AnswerState>(
                 `/api/v1/rooms/${code}/answers/${requestedIndex}`,
-                {headers: {Authorization: `Bearer ${token}`}}
+                {signal, headers: {Authorization: `Bearer ${token}`}}
             );
 
+            if (signal.aborted) return false;
             if (
                 version !== requestVersionRef.current ||
                 activeQuestionRef.current !== requestedIndex ||
                 data.questionIndex !== requestedIndex
             ) {
-                return;
+                return true;
             }
 
             setAnswerState(data);
+            setPollError('');
 
             if (data.submitted && data.myAnswer) {
                 setAnswer(data.myAnswer);
             }
+            return !data.bothSubmitted;
         } catch (e) {
-            if (
-                version === requestVersionRef.current &&
-                activeQuestionRef.current === requestedIndex
-            ) {
-                setError(e instanceof Error ? e.message : '답변 상태를 불러오지 못했습니다.');
-            }
+            if (signal.aborted) return false;
+            throw e;
         }
     }, [token, phase, code, index]);
 
@@ -259,16 +254,9 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         setAnswerState(null);
         setAnswer('');
 
-        if (phase !== 'question') return;
-
-        void refreshAnswer();
-        const timer = setInterval(() => void refreshAnswer(), 1800);
-
-        return () => {
-            clearInterval(timer);
-            ++requestVersionRef.current;
-        };
-    }, [phase, index, refreshAnswer]);
+        return () => { ++requestVersionRef.current; };
+    }, [phase, index]);
+    usePolling(refreshAnswer, !!token && !accessBlocked && phase === 'question', 1800, onPollError);
 
     async function join(e: FormEvent) {
         e.preventDefault();
@@ -306,7 +294,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     async function submitAnswer(e: FormEvent) {
         e.preventDefault();
 
-        if (!token || busy || !answer.trim() || answerState?.submitted) return;
+        if (!token || accessBlocked || busy || !answer.trim() || answerState?.submitted) return;
 
         const submittedIndex = index;
         const submittedAnswer = answer.trim();
@@ -345,7 +333,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
     }
 
     async function nextQuestion() {
-        if (!answerState?.bothSubmitted || answerState.questionIndex !== index) return;
+        if (accessBlocked || !answerState?.bothSubmitted || answerState.questionIndex !== index) return;
 
         ++requestVersionRef.current;
 
@@ -356,44 +344,22 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
             setIndex(v => v + 1);
         } else {
             setPhase('results');
-
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                setResult(data);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : '결과를 불러오지 못했습니다.');
-            }
         }
     }
 
-    useEffect(() => {
-        if (phase !== 'results' || !token) return;
-
-        let live = true;
-
-        async function load() {
-            try {
-                const data = await api<ResultsState>(
-                    `/api/v1/rooms/${code}/results`,
-                    {headers: {Authorization: `Bearer ${token}`}}
-                );
-                if (live) setResult(data);
-            } catch {}
-        }
-
-        void load();
-        const timer = setInterval(() => void load(), 2000);
-
-        return () => {
-            live = false;
-            clearInterval(timer);
-        };
-    }, [phase, token, code]);
+    const refreshResults = useCallback(async (signal: AbortSignal) => {
+        const data = await api<ResultsState>(`/api/v1/rooms/${code}/results`, {
+            signal, headers: {Authorization: `Bearer ${token}`},
+        });
+        if (signal.aborted) return false;
+        setResult(data);
+        setPollError('');
+        return !data.allComplete;
+    }, [code, token]);
+    usePolling(refreshResults, phase === 'results' && !!token && !accessBlocked && !result?.allComplete, 2000, onPollError);
 
     async function getShareUrl(): Promise<string> {
+        if (accessBlocked) throw new Error('방에 접근할 수 없습니다. 만료 또는 인증 상태를 확인해 주세요.');
         if (!token || !result?.allComplete) throw new Error('결과를 모두 완료한 뒤 공유할 수 있습니다.');
         const shared = await api<{shareToken: string; sharePath: string}>(
             `/api/v1/rooms/${encodeURIComponent(code)}/share`,
@@ -562,7 +528,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
         answerState?.questionIndex === index ? answerState : null;
 
     return (
-        <main className="panel-page">
+        <main className="panel-page room-experience">
             <Link className="logo" href="/">42Hz</Link>
             <div className="room-shell">
                 <section className="room-card">
@@ -592,7 +558,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                                     <Wave/>
                                     <button className="action" onClick={() => copy(code, '초대 코드')}>초대 코드 복사</button>
-                                    <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초 대 링크')}>초대 링크 복사</button>
+                                    <button className="action secondary" onClick={() => copy(window.location.origin + `/room/${code}`, '초대 링크')}>초대 링크 복사</button>
                                     {copyMessage && <p className="status-line" role="status">{copyMessage}</p>}
                                     <p className="status-line">
                                         <span className="status-dot"/>
@@ -667,21 +633,22 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                     {phase === 'question' && (
                         <>
-                            <div className="question-progress">
-                                <span>QUESTION {String(index + 1).padStart(2, '0')} / 13</span>
+                            <div className="question-progress" aria-label={`13개 질문 중 ${index + 1}번째`}>
+                                <span>질문 {String(index + 1).padStart(2, '0')} / 13</span>
                                 <span>{Math.round(((index + 1) / 13) * 100)}%</span>
                             </div>
-                            <div className="progress-track">
+                            <div className="progress-track" role="progressbar" aria-label="질문 진행률" aria-valuemin={0} aria-valuemax={13} aria-valuenow={index + 1}>
                                 <div style={{width: `${((index + 1) / 13) * 100}%`}}/>
                             </div>
-                            <div className="eyebrow" style={{marginTop:28}}>42HZ · OUR EXPERIENCE</div>
-                            <h1>{question.title}</h1>
-                            <p className="question-prompt">{question.prompt}</p>
+                            <p className="question-context">{question.title}</p>
+                            <h1 id="question-title" className="question-prompt">{question.prompt}</h1>
 
                             {visibleAnswerState?.bothSubmitted ? (
-                                <div className="answer-reveal">
-                                    <p className="eyebrow">BOTH ANSWERS SUBMITTED</p>
-                                    <h2>서로의 선택을 확인해 보세요.</h2>
+                                <div className="answer-reveal" key={`reveal-${index}`} role="region" aria-label="두 사람의 답변">
+                                    <AnswerRevealSignal/>
+                                    <span className="flow-badge" role="status">두 사람의 답변이 공개되었어요</span>
+                                    <h2>우리의 주파수가 만났어요.</h2>
+                                    <p className="muted reveal-caption">같은 선택도, 다른 선택도 대화의 시작이에요.</p>
                                     <div className="answer-pair">
                                         <div>
                                             <small>나의 답변</small>
@@ -697,10 +664,11 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                     </button>
                                 </div>
                             ) : visibleAnswerState?.submitted ? (
-                                <div className="waiting-answer">
+                                <div className="waiting-answer" role="status" aria-live="polite">
                                     <Wave/>
-                                    <h2>답변을 보관했어요.</h2>
-                                    <p className="muted">상대방이 답변을 제출하면 함께 공개됩니다.</p>
+                                    <span className="flow-badge">내 답변 제출 완료</span>
+                                    <h2>상대방의 리듬을 기다리고 있어요.</h2>
+                                    <p className="muted">서두르지 않아도 괜찮아요.<br/>두 사람의 답변이 모이면 함께 열립니다.</p>
                                     <p className="status-line">
                                         <span className="status-dot"/>
                                         {visibleAnswerState.submittedCount}/2명 제출 완료
@@ -709,22 +677,14 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                             ) : (
                                 <form key={index} onSubmit={submitAnswer} className="answer-form">
                                     {question.type === 'choice' ? (
-                                        question.options?.map((option, i) => (
-                                            <label className={`answer-option ${answer === option ? 'selected' : ''}`} key={option}>
-                                                <input
-                                                    type="radio"
-                                                    name={`q-${index}`}
-                                                    value={option}
-                                                    checked={answer === option}
-                                                    onChange={() => setAnswer(option)}
-                                                />
-                                                <span className="option-letter">{String.fromCharCode(65 + i)}</span>
-                                                <span>{option}</span>
-                                            </label>
-                                        ))
+                                        <AnswerChoices options={question.options ?? []} value={answer}
+                                            onChange={setAnswer} labelledBy="question-title" disabled={busy || accessBlocked} />
                                     ) : (
                                         <>
                       <textarea
+                          aria-labelledby="question-title"
+                          aria-describedby="answer-count answer-privacy"
+                          name="answer"
                           className="field text-answer"
                           maxLength={1000}
                           rows={4}
@@ -732,13 +692,13 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                           onChange={e => setAnswer(e.target.value)}
                           placeholder={question.hint}
                       />
-                                            <p className="muted char-count">{answer.length}/1000</p>
+                                            <p id="answer-count" className="muted char-count">{answer.length}/1000</p>
                                         </>
                                     )}
-                                    <button className="action" disabled={busy || !answer.trim()}>
+                                    <button className="action" disabled={accessBlocked || busy || !answer.trim()}>
                                         {busy ? '제출 중…' : '답변 제출하기 →'}
                                     </button>
-                                    <p className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
+                                    <p id="answer-privacy" className="muted small-note">상대방이 제출하기 전까지 답변은 공개되지 않습니다.</p>
                                 </form>
                             )}
                         </>
@@ -746,12 +706,9 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
 
                     {phase === 'results' && (
                         <>
-                            <div className="eyebrow">YOUR FREQUENCY REPORT</div>
-                            <h1>서로의 답을 확인해 보세요.</h1>
-                            <p className="muted">두 사람의 답변을 나란히 모았어요. 서로 다른 선택도 새로운 발견이 될 수 있습니다.</p>
-
                             {!result?.allComplete ? (
-                                <div className="waiting-answer">
+                                <div className="waiting-answer" role="status" aria-live="polite">
+                                    <h1>두 사람의 기록을 모으고 있어요.</h1>
                                     <Wave/>
                                     <p>상대방의 마지막 답변을 기다리고 있어요.</p>
                                 </div>
@@ -761,28 +718,26 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                         const report = buildReport(result);
                                         return (
                                             <section className="frequency-report">
-                                                <div className="eyebrow">42Hz · OUR FREQUENCY</div>
-                                                <h2>{report.title}</h2>
-                                                <p className="muted">두 사람의 답변으로 발견한 작은 이야기</p>
-                                                <Wave connected/>
+                                                <h1>{report.title}</h1>
                                                 <div className="report-stats">
                                                     <div><strong>{report.matched}</strong><span>같은 선택</span></div>
                                                     <div><strong>{report.different}</strong><span>다른 선택</span></div>
                                                 </div>
+                                                <Wave connected/>
                                                 <div className="report-insights">
                                                     <article>
-                                                        <span>01 · 우리의 리듬</span>
-                                                        <h3>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h3>
+                                                        <span>우리의 리듬</span>
+                                                        <h2>{report.similarity >= 75 ? '생각보다 닮은 마음' : report.similarity >= 40 ? '닮음과 다름 사이' : '서로 다른 매력'}</h2>
                                                         <p>{report.connection}</p>
                                                     </article>
                                                     <article>
-                                                        <span>02 · 서로를 위한 힌트</span>
-                                                        <h3>힘든 날의 위로</h3>
+                                                        <span>서로를 위한 힌트</span>
+                                                        <h2>힘든 날의 위로</h2>
                                                         <p>{report.comfort}</p>
                                                     </article>
                                                     <article>
-                                                        <span>03 · 오래 남을 장면</span>
-                                                        <h3>각자의 마음에 남은 기억</h3>
+                                                        <span>오래 남을 장면</span>
+                                                        <h2>각자의 마음에 남은 기억</h2>
                                                         <p>서로가 고른 장면을 천천히 읽어 보세요. 같은 하루를 다르게 기억하고 있을 수도 있어요.</p>
                                                         {report.memory && (
                                                             <div className="report-memories">
@@ -792,7 +747,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                                                         )}
                                                     </article>
                                                 </div>
-                                                <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격 을 진단하지 않습니다.</p>
+                                                <p className="report-disclaimer">이 분석은 답변을 바탕으로 만든 가벼운 이야기예요. 궁합이나 성격을 진단하지 않습니다.</p>
                                                 <button
                                                     className="action secondary"
                                                     onClick={() => {
@@ -833,7 +788,7 @@ export default function RoomPage({params}: {params: Promise<{code: string}>}) {
                         </>
                     )}
 
-                    {error && <p role="alert" className="error-text">{error}</p>}
+                    {(error || pollError) && <p role="alert" className="error-text">{error || pollError}</p>}
                 </section>
             </div>
         </main>

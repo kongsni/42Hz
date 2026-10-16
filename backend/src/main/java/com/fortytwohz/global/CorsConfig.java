@@ -15,7 +15,7 @@ public class CorsConfig implements WebMvcConfigurer {
                         "http://localhost:3000",
                         "https://42-hz.vercel.app"
                 )
-                .allowedMethods("GET", "POST", "OPTIONS")
+                .allowedMethods("GET", "POST", "DELETE", "OPTIONS")
                 .allowedHeaders("Authorization", "Content-Type");
     }
 }

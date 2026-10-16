@@ -66,13 +66,9 @@ export default function SharedResultPage({
 
             <div className="room-shell">
                 <section className="room-card">
-                    <div className="eyebrow">
-                        42HZ · SHARED FREQUENCY
-                    </div>
-
                     {loading ? (
                         <>
-                            <h1>두 사람의 주파수를 불러오는 중...</h1>
+                            <h1>두 사람의 주파수를 불러오는 중…</h1>
                             <p className="muted">
                                 잠시만 기다려 주세요.
                             </p>
@@ -87,15 +83,7 @@ export default function SharedResultPage({
                         </>
                     ) : result ? (
                         <div className="frequency-report">
-                            <div className="eyebrow">
-                                42Hz · OUR FREQUENCY
-                            </div>
-
                             <h1>{result.title}</h1>
-
-                            <p className="muted">
-                                두 사람의 답변으로 발견한 작은 이야기
-                            </p>
 
                             <div className="report-stats">
                                 <div>
@@ -111,8 +99,8 @@ export default function SharedResultPage({
 
                             <div className="report-insights">
                                 <article>
-                                    <span>01 · 우리의 리듬</span>
-                                    <h3>두 사람의 주파수</h3>
+                                    <span>우리의 리듬</span>
+                                    <h2>두 사람의 주파수</h2>
                                     <p>{result.connection}</p>
                                 </article>
                             </div>

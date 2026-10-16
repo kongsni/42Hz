@@ -1,9 +1,25 @@
 .hero{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:100svh;overflow:hidden;color:#263151;background:radial-gradient(ellipse at 18% 45%,#dce9ff 0%,transparent 45%),radial-gradient(ellipse at 86% 47%,#f9deed 0%,transparent 43%),linear-gradient(150deg,#f9fbff,#f6f3fc 70%,#fff9fb)}
-.hero:before,.hero:after{content:"";position:absolute;z-index:-1;width:25vw;max-width:290px;height:45vh;top:28%;border:1px solid #ffffffba;border-radius:50% 50% 4px 4px;box-shadow:0 0 70px #a3bffa36,inset 0 0 55px #fff8;pointer-events:none}
+.hero:before,.hero:after{content:"";position:absolute;z-index:-1;width:25vw;max-width:290px;height:45vh;top:28%;border:1px solid #ffffffba;border-radius:50% 50% 4px 4px;box-shadow:inset 0 0 32px #ffffff66;pointer-events:none}
 .hero:before{left:-8vw;background:linear-gradient(180deg,#d1e5ff99,#a4c9fa15)}.hero:after{right:-8vw;background:linear-gradient(180deg,#f7d4e999,#e7b7d115)}
 .haze{position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 50% 62%,#ffffffba,transparent 45%)}
 .nav{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px clamp(22px,6vw,96px)}.logo{font:36px Georgia,serif;letter-spacing:-2px}.links{display:flex;gap:36px;color:#58637e;font-size:14px}.links a:hover{text-decoration:underline}.topCta{padding:13px 22px;border:1px solid #b5bfd9;border-radius:999px;font-size:14px;white-space:nowrap}
-.content{width:100%;max-width:1100px;margin:auto;display:flex;align-items:center;flex-direction:column;text-align:center;padding:64px 20px 50px}.kicker{font-size:11px;letter-spacing:5px;color:#7b84a6}.brand{font:clamp(100px,14vw,170px)/1.05 Georgia,serif;letter-spacing:-8px;margin:24px 0 10px;background:linear-gradient(115deg,#6589ce,#9985cd 60%,#d18eae);color:transparent;background-clip:text}.headline{font-size:clamp(23px,3vw,38px);font-weight:600;letter-spacing:-1.4px;margin:14px 0 8px}.subtitle{color:#69738e;font-size:clamp(14px,1.6vw,18px);margin:8px 0}.waves{width:min(850px,100%);height:clamp(90px,15vw,170px);margin:22px 0 12px;overflow:visible}.waves path{fill:none;stroke-width:3;stroke-linecap:round;filter:drop-shadow(0 0 6px #aab4ee88)}.blue{animation:drift 5s ease-in-out infinite alternate}.pink{animation:drift 5s ease-in-out infinite alternate-reverse}.cta{display:inline-flex;align-items:center;gap:20px;background:linear-gradient(100deg,#e1edff,#f7d8ed);border:1px solid #fff;border-radius:999px;padding:19px 36px;font-weight:700;box-shadow:0 14px 38px #b5a8d54a;transition:transform .2s}.cta:hover{transform:translateY(-3px)}.meta{display:flex;justify-content:center;gap:clamp(22px,7vw,100px);padding:26px 18px 35px;color:#78839d;font-size:14px}
+.content{width:100%;max-width:1100px;margin:auto;display:flex;align-items:center;flex-direction:column;text-align:center;padding:64px 20px 50px}.kicker{font-size:11px;letter-spacing:5px;color:#7b84a6}.brand{font:clamp(100px,14vw,170px)/1.05 Georgia,serif;letter-spacing:-8px;margin:8px 0 14px;background:linear-gradient(115deg,#6589ce,#9985cd 60%,#d18eae);color:transparent;background-clip:text}.headline{font-size:clamp(23px,3vw,38px);font-weight:600;letter-spacing:-1.4px;margin:14px 0 8px}.subtitle{color:#535e79;font-size:clamp(14px,1.6vw,18px);margin:8px 0}.waves{width:min(850px,100%);height:clamp(90px,15vw,170px);margin:26px 0 20px;overflow:visible}.waves path{fill:none;stroke-width:3;stroke-linecap:round;filter:none}.blue{animation:drift 5s ease-in-out infinite alternate}.pink{animation:drift 5s ease-in-out infinite alternate-reverse}.cta{display:inline-flex;align-items:center;gap:20px;background:linear-gradient(100deg,#e1edff,#f7d8ed);border:1px solid #bcc2db;border-radius:999px;padding:19px 36px;font-weight:700;box-shadow:0 6px 18px #b5a8d526;transition:transform .2s}.cta:hover{transform:translateY(-3px)}.meta{display:flex;justify-content:center;gap:clamp(22px,7vw,100px);padding:26px 18px 35px;color:#535e79;font-size:14px}
 @keyframes drift{from{transform:translateY(-6px)}to{transform:translateY(6px)}}
 @media(max-width:700px){.nav{padding:20px}.links,.topCta{display:none}.content{padding:54px 18px 35px}.brand{letter-spacing:-5px}.kicker{letter-spacing:2.5px;font-size:9px}.headline{letter-spacing:-.5px}.cta{padding:16px 24px}.meta{gap:12px;font-size:11px;flex-wrap:wrap}.hero:before,.hero:after{top:37%;height:25vh}}
 @media(prefers-reduced-motion:reduce){.waves path{animation:none}.cta{transition:none}}
+
+/* Low-amplitude movement, like two slowly breathing signals. */
+.blue,.pink{transform-box:fill-box;transform-origin:center;will-change:transform}
+.blue{animation:signalBlue 4s ease-in-out 1 both}
+.pink{animation:signalPink 4.5s ease-in-out -.8s 1 both}
+@keyframes signalBlue{0%,100%{transform:translate(-3px,-2px) scaleY(.96)}50%{transform:translate(3px,2px) scaleY(1.04)}}
+@keyframes signalPink{0%,100%{transform:translate(3px,2px) scaleY(1.04)}50%{transform:translate(-3px,-2px) scaleY(.96)}}
+@media(prefers-reduced-motion:reduce){.blue,.pink{animation:none;will-change:auto}}
+
+/* Keep the existing composition; give the message and action a quiet, clear edge. */
+.hero:before,.hero:after{opacity:.55}
+.headline{max-width:22ch;text-wrap:balance;line-height:1.45}
+.subtitle{max-width:40rem;line-height:1.8;text-wrap:balance}
+.cta{min-height:52px;touch-action:manipulation}
+.topCta{min-height:44px;display:inline-flex;align-items:center}
+@media(max-width:700px){.topCta{display:none}.content{padding-block:40px 30px}.meta{font-size:12px;line-height:1.7}}

@@ -6,10 +6,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class RoomService {
@@ -20,15 +22,18 @@ public class RoomService {
     private final RoomRepository rooms;
     private final ParticipantRepository participants;
     private final AnswerRepository answers;
+    private final Clock clock;
 
     public RoomService(
             RoomRepository rooms,
             ParticipantRepository participants,
-            AnswerRepository answers
+            AnswerRepository answers,
+            Clock clock
     ) {
         this.rooms = rooms;
         this.participants = participants;
         this.answers = answers;
+        this.clock = clock;
     }
 
     @Transactional
@@ -39,7 +44,7 @@ public class RoomService {
             code = randomString(ALPHABET, 8);
         } while (rooms.existsByInviteCode(code));
 
-        Room room = rooms.save(new Room(code));
+        Room room = rooms.save(new Room(code, clock.instant()));
         String token = token();
 
         participants.save(
@@ -62,7 +67,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -93,7 +98,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -145,7 +150,7 @@ public class RoomService {
                         "방을 찾을 수 없습니다."
                 ));
 
-        if (room.isExpired()) {
+        if (room.isExpired(clock.instant())) {
             throw error(HttpStatus.GONE, "만료된 방입니다.");
         }
 
@@ -165,30 +170,14 @@ public class RoomService {
             );
         }
 
-        // 핵심 수정:
-        // 이전 질문들을 두 사람이 모두 완료했는지 확인합니다.
-        // questionIndex는 0부터 시작합니다.
+        String value = QuestionCatalog.validateAnswer(questionIndex, answerText);
+        Map<Integer, List<Answer>> byQuestion = answers.findByRoomOrderByQuestionIndexAsc(room)
+                .stream().collect(Collectors.groupingBy(Answer::getQuestionIndex));
         for (int i = 0; i < questionIndex; i++) {
-            List<Answer> previousAnswers =
-                    answers.findByRoomAndQuestionIndex(room, i);
-
-            if (previousAnswers.size() != 2) {
-                throw error(
-                        HttpStatus.CONFLICT,
-                        "이전 질문을 완료한 후 다음 질문으로 이동할 수 있습니다."
-                );
+            if (byQuestion.getOrDefault(i, List.of()).size() != 2) {
+                throw error(HttpStatus.CONFLICT,
+                        "이전 질문을 완료한 후 다음 질문으로 이동할 수 있습니다.");
             }
-        }
-
-        String value = answerText == null
-                ? ""
-                : answerText.trim();
-
-        if (value.isBlank()) {
-            throw error(
-                    HttpStatus.BAD_REQUEST,
-                    "답변을 입력해 주세요."
-            );
         }
 
         Answer current = answers
@@ -204,7 +193,7 @@ public class RoomService {
         }
 
         answers.save(
-                new Answer(room, me, questionIndex, value)
+                new Answer(room, me, questionIndex, value, clock.instant())
         );
 
         return answerStateFor(room, me, questionIndex);
@@ -251,9 +240,10 @@ public class RoomService {
 
         boolean allComplete = members.size() == 2;
 
-        for (int i = 0; i < 13; i++) {
-            List<Answer> list =
-                    answers.findByRoomAndQuestionIndex(room, i);
+        Map<Integer, List<Answer>> byQuestion = answers.findByRoomOrderByQuestionIndexAsc(room)
+                .stream().collect(Collectors.groupingBy(Answer::getQuestionIndex));
+        for (int i = 0; i < QuestionCatalog.TOTAL_QUESTIONS; i++) {
+            List<Answer> list = byQuestion.getOrDefault(i, List.of());
 
             boolean complete = list.size() == 2;
             allComplete &= complete;
@@ -322,6 +312,10 @@ public class RoomService {
     }
 
     private Participant authenticate(Room room, String bearer) {
+        if (room.isExpired(clock.instant())) {
+            throw error(HttpStatus.GONE, "만료된 방입니다.");
+        }
+
         if (bearer == null
                 || !bearer.startsWith("Bearer ")
                 || bearer.length() <= 7) {

@@ -40,20 +40,36 @@ public class SharedResult {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+    @Column(name = "retention_review_required", nullable = false)
+    private boolean retentionReviewRequired;
+    @Column(name = "retention_review_detected_at")
+    private Instant retentionReviewDetectedAt;
+
     protected SharedResult() {}
+
+    public boolean isExpired(Instant now) {
+        return retentionReviewRequired || createdAt == null || expiresAt == null
+                || createdAt.isAfter(now)
+                || !createdAt.plusSeconds(7 * 86400).equals(expiresAt)
+                || !expiresAt.isAfter(now);
+    }
 
     public SharedResult(
             Room room,
             String shareToken,
             int matchedCount,
-            int differentCount
+            int differentCount,
+            Instant now
     ) {
         this.id = UUID.randomUUID();
         this.room = room;
         this.shareToken = shareToken;
         this.matchedCount = matchedCount;
         this.differentCount = differentCount;
-        this.createdAt = Instant.now();
+        this.createdAt = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        this.expiresAt = createdAt.plusSeconds(7 * 86400);
     }
 
     public String getShareToken() {

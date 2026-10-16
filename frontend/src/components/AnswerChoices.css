@@ -1,0 +1,40 @@
+/* Lucian UX/UI Prompt #015 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#015 */
+.u015{--ux-surface:#fff;--ux-ink:var(--ink,#343956);--ux-ink-2:#535e79;--ux-ink-3:#535e79;--ux-line:#e6e5f0;--ux-line-2:#8a8da8;--ux-accent:#7476b0;--ux-accent-soft:#f0effa;--ux-ease:cubic-bezier(.2,.8,.2,1);--ux-spring:cubic-bezier(.34,1.45,.64,1);max-width:100%;margin-inline:auto;font:inherit;word-break:keep-all;overflow-wrap:break-word}
+.u015,.u015 *,.u015 *::before,.u015 *::after{box-sizing:border-box}
+.u015 button{font:inherit;cursor:pointer}
+.u015 button:disabled{cursor:default;opacity:.65}
+.u015[data-theme="dark"]{--ux-surface:#222433;--ux-ink:#f4f0f8;--ux-ink-2:#cbc5da;--ux-ink-3:#b1acc3;--ux-line:#404257;--ux-line-2:#656780;--ux-accent:#c4b8f0;--ux-accent-soft:#37314d}
+
+.u015{position:relative;width:330px}
+.u015-grp{position:relative;display:flex;flex-direction:column;gap:10px}
+.u015-frame{position:absolute;left:0;right:0;top:0;height:0;border-radius:22px;pointer-events:none;
+  box-shadow:0 0 0 2px var(--ux-accent),0 18px 36px -20px color-mix(in srgb,var(--ux-accent) 70%,transparent);
+  background:linear-gradient(135deg,color-mix(in srgb,var(--ux-accent) 9%,transparent),transparent 70%);
+  transition:top .55s var(--ux-spring),height .55s var(--ux-spring)}
+.u015-opt{position:relative;display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;border:0;border-radius:22px;background:var(--ux-surface);color:var(--ux-ink);text-align:left;
+  box-shadow:0 0 0 1px var(--ux-line);transition:transform .4s var(--ux-spring),box-shadow .3s var(--ux-ease)}
+.u015-opt:hover{box-shadow:0 0 0 1px var(--ux-line-2)}
+.u015-opt:active{transform:scale(.98)}
+.u015-opt:focus-visible{outline:2px solid var(--ux-accent);outline-offset:4px}
+.u015-dot{position:relative;width:24px;height:24px;flex:none;border-radius:50%;box-shadow:inset 0 0 0 2px var(--ux-line-2);transition:box-shadow .3s var(--ux-ease)}
+.u015-dot::after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--ux-accent);transform:scale(0);transition:transform .45s var(--ux-spring)}
+.u015-opt[aria-checked="true"] .u015-dot{box-shadow:inset 0 0 0 2px var(--ux-accent)}
+.u015-opt[aria-checked="true"] .u015-dot::after{transform:scale(1)}
+.u015-ic{width:42px;height:42px;flex:none;border-radius:13px;display:grid;place-items:center;color:#fff;background:var(--g)}
+.u015-ic svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.u015-txt{flex:1;min-width:0}
+.u015-txt b{display:flex;align-items:center;gap:7px;font-size:16px;font-weight:720;letter-spacing:-.02em}
+.u015-txt em{font-style:normal;font-size:11px;font-weight:750;padding:3px 7px;border-radius:999px;background:var(--ux-accent-soft);color:var(--ux-accent)}
+.u015-txt small{display:block;margin-top:3px;font-size:13px;color:var(--ux-ink-3)}
+.u015-price{text-align:right;font-variant-numeric:tabular-nums;color:var(--ux-ink-3);transition:color .35s var(--ux-ease)}
+.u015-price b{display:block;font-size:17px;font-weight:760;letter-spacing:-.02em}
+.u015-price small{font-size:11.5px}
+.u015-opt[aria-checked="true"] .u015-price{color:var(--ux-ink)}
+.u015-cta{display:flex;align-items:center;justify-content:space-between;margin:16px 0 0;padding:0 6px;font-size:14px;color:var(--ux-ink-2)}
+.u015-cta b{color:var(--ux-ink);font-variant-numeric:tabular-nums}
+
+.u015-opt{min-height:64px;line-height:1.65}
+.u015-txt b{font-weight:550}
+.u015-frame{z-index:1}
+.u015-opt:disabled:active{transform:none}
+@media(prefers-reduced-motion:reduce){.u015,.u015 *,.u015 *::before,.u015 *::after{animation:none!important;transition:none!important}}

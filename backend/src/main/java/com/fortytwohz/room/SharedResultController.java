@@ -14,6 +14,18 @@ public class SharedResultController {
         this.service = service;
     }
 
+    @ModelAttribute
+    public void disableCaching(jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+    }
+
+    @DeleteMapping("/rooms/{code}/share")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeShare(@PathVariable String code,
+            @RequestHeader(value = "Authorization", required = false) String bearer) {
+        service.revokeShare(code, bearer);
+    }
+
     @PostMapping("/rooms/{code}/share")
     @ResponseStatus(HttpStatus.CREATED)
     public SharedResultService.ShareResponse createShare(
